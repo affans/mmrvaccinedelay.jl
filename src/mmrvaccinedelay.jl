@@ -36,10 +36,13 @@ end
 # agebraks not really used
 const agedist =  Categorical(@SVector [0.053, 0.055, 0.052, 0.056, 0.067, 0.07, 0.07, 0.068, 0.064, 0.066, 0.072, 0.073, 0.064, 0.054, 0.116])
 const agebraks_old = @SVector [0:4, 5:9, 10:14, 15:19, 20:24, 25:29, 30:34, 35:39, 40:44, 45:49, 50:54, 55:59, 60:64, 65:69, 70:85]
-const agebraks = @SVector [0:200, 201:450, 451:700, 701:950, 951:1200, 1201:1450, 1451:1700, 1701:1950, 1951:2200, 2201:2450, 2451:2700, 2701:2950, 2951:3200, 3201:3450, 3451:4251] ## ADD ONE more to the end because age++ will make it 4251 before removing the human
+const agebraks = @SVector [0:200, 201:450, 451:700, 701:950, 951:1200, 1201:1450, 1451:1700, 1701:1950, 1951:2200, 2201:2450, 2451:2700, 2701:2950, 2951:3200, 3201:3450, 3451:4250]
 
 const humans = Array{Human}(undef, 10000)
 export HEALTH, humans
+
+const NB = negative_binomials()
+const CM = contact_matrix()
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
@@ -50,11 +53,10 @@ function main(simnumber)
 
     insert_infected(2000)
 
-    NB = negative_binomials()
-    CM = contact_matrix()
+
 
     maxtime = 50*50
-
+    
     ## data collection variables = number of elements is the time units. 
     ## so the vector collects number of latent/symp/asymp at time t. 
     ## it does not collect the initial latent case.
@@ -64,26 +66,45 @@ function main(simnumber)
     ## contact matrices
 
     ## these matrices are used to calculate contact patterns
-    fcm    = zeros(Int64, 15, 15)   ## how many times did susc/sick contact group i meet contact group j meet but failed to infect.
+    fcm = zeros(Int64, 15, 15)   ## how many times did susc/sick contact group i meet contact group j meet but failed to infect.
     cmg = zeros(Int64, 15, 15)   ## how many times did contact group i meet with contact group j
     
     ## we setup an array for who belongs to each group
-
+    _contacts = zeros(Int64, 10000, 50*50)
+    
     infected = findall(x -> x.health == INF, humans)
-
+    oldc = _contacts
     for i = 1:maxtime
         agm = [humans[i].group for i = 1:10000]
 
-        for x in humans
-            age_and_vaccinate(x)  ## increase age of each agent. vaccinate if neccessary            
+        for j in 1:10000
+            g, c = age_and_vaccinate(humans[j])  ## increase age of each agent. vaccinate if neccessary            
+            if g 
+                #println("g changed")
+                edit_contacts(j, _contacts)
+            end
         end
         # for i in infected
         #     contact_dynamic2(humans[i], NB, CM, agm)
         # end
-    end
-    return infected
+    end    
+    return oldc, _contacts
 end
 export main
+
+function setup_contacts(cts)
+    for i = 1:10000
+        ig = humans[i].group                
+        cts[i, :] = rand(NB[ig], 50*50) ## get the number of contacts
+    end
+    return cts
+end
+export setup_contacts
+
+@inline function edit_contacts(rowid, cts)
+    cts[rowid, :] = rand(NB[humans[rowid].group ], 50*50)
+end
+export edit_contacts
 
 function insert_infected(cnt) 
     h = rand(1:10000, cnt)
@@ -126,7 +147,8 @@ export init_population
 function get_group(age)
     # input age: in weeks, output group from 1:15 
     r = findfirst(brak -> age in brak, agebraks) 
-    if r == nothing 
+    if r === nothing 
+        println("$age")
         error("get_group threw an error")
     end
     return r 
@@ -134,18 +156,29 @@ end
 export get_group
 
 function age_and_vaccinate(x::Human)
-    ls = false
+    grp_changed = false
+    cnt_vaccinated = 0
+    grp = x.group
     newage = x.age + 1
-    x.age = newage
-    x.group = get_group(newage)
-    if newage == x.vaccinetime
-        x.vaccinated == true
-    end
+
     if newage > x.ageofdeath
         replace_human(x)
         ls = true
+    else 
+        x.age = newage
+        x.group = get_group(newage) 
     end
-    return ls
+    # group has changed
+    if x.group != grp 
+        grp_changed = true
+    end
+
+    if newage == x.vaccinetime
+        x.vaccinated == true
+        cnt_vaccinated += 1
+    end
+   
+    return grp_changed, cnt_vaccinated
 end
 export age_and_vaccinate
 

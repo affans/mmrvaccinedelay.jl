@@ -35,5 +35,5 @@ end
     ## check whether groups are changing as age++
     ## repeat the loop for 1000 times and see how age changes (store it into a matrix)
     ## check whether agm contains the right groups. 
-   
+    ## check whether the sum of all IDs is the same after 1000 iterations. the .idx proeprty of human is important
 end
