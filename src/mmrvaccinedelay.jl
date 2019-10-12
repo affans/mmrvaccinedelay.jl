@@ -37,12 +37,8 @@ end
 const agedist =  Categorical(@SVector [0.053, 0.055, 0.052, 0.056, 0.067, 0.07, 0.07, 0.068, 0.064, 0.066, 0.072, 0.073, 0.064, 0.054, 0.116])
 const agebraks_old = @SVector [0:4, 5:9, 10:14, 15:19, 20:24, 25:29, 30:34, 35:39, 40:44, 45:49, 50:54, 55:59, 60:64, 65:69, 70:85]
 const agebraks = @SVector [0:200, 201:450, 451:700, 701:950, 951:1200, 1201:1450, 1451:1700, 1701:1950, 1951:2200, 2201:2450, 2451:2700, 2701:2950, 2951:3200, 3201:3450, 3451:4250]
-
-const humans = Array{Human}(undef, 10000)
-export HEALTH, humans
-
-const NB = negative_binomials()
-const CM = contact_matrix()
+const humans = Array{Human}(undef, 1000)
+export HEALTH, humans, agedist, agebraks
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
@@ -50,10 +46,7 @@ function main(simnumber)
     # main entry of the simulation
     Random.seed!(simnumber)
     init_population()
-
-    insert_infected(2000)
-
-
+    insert_infected(20)
 
     maxtime = 50*50
     
@@ -61,58 +54,111 @@ function main(simnumber)
     ## so the vector collects number of latent/symp/asymp at time t. 
     ## it does not collect the initial latent case.
     vacc_ctr = zeros(Int64, maxtime )   
-    symp_ctr = zeros(Int64, maxtime)   
-
+    symp_ctr = zeros(Int64, 50*50)   
+    prev_ctr = zeros(Int64, 50*50)
+    reco_ctr = zeros(Int64, 50*50)
+    left_ctr = zeros(Int64, 50*50)
+    left_inf = zeros(Int64, 50*50)
+    swap_inc = zeros(Int64, 50*50)
+    beta_ctr = zeros(Float64, 50*50)
     ## contact matrices
+    
+    beta0 = 0.08
+    beta1 = 0.9
 
-    ## these matrices are used to calculate contact patterns
+    ## these matrices are used to calculate contact patterns. 
     fcm = zeros(Int64, 15, 15)   ## how many times did susc/sick contact group i meet contact group j meet but failed to infect.
     cmg = zeros(Int64, 15, 15)   ## how many times did contact group i meet with contact group j
     
     ## we setup an array for who belongs to each group
-    _contacts = zeros(Int64, 10000, 50*50)
-    
-    infected = findall(x -> x.health == INF, humans)
-    oldc = _contacts
-    for i = 1:maxtime
-        agm = [humans[i].group for i = 1:10000]
+    _contacts = zeros(Int64, 1000, 50*50)
+    #_agm = zeros(Bool, 15, 1000)   # a matrix representation of who is inside that age group (ie. row 1 has all the people that have group 1). 
+    _agm = Vector{Vector{Int64}}(undef, 15)
+    _groups= Matrix{Vector{Int64}}(undef, 1000, 2500)
+    #setup_contacts(_contacts, _groups)
+    setup_agm(_agm)
+    println("finished setting up contacts")
+    #_groups = Array{Array{Int64, 1}, 1}(undef, (1000, 50*50))
 
-        for j in 1:10000
-            g, c = age_and_vaccinate(humans[j])  ## increase age of each agent. vaccinate if neccessary            
-            if g 
-                #println("g changed")
-                edit_contacts(j, _contacts)
+    
+    println("in system: $(length(findall(x -> x.health == INF, humans)))")
+    for t = 1:maxtime        
+        for j in 1:1000            
+            x = humans[j]
+            b = beta0*(1+ beta1*sin(2*pi*t/52))
+            beta_ctr[t] = b
+            dt   = contact_dynamic2(x, b, _agm )
+            g, c, l, s = age_and_vaccinate(x)  ## increase age of each agent. vaccinate if neccessary            
+            # # any new people becoming infected and group has changed, edit their contact patterns.
+            # if g && humans[j].swap == INF
+            #     edit_contacts(j, _contacts, _groups)
+            # end
+             # if they were infected, they are now recovered.
+           
+            left_ctr[t] += l
+            left_inf[t] += s       
+        end             
+        
+        # update swaps
+        for x in humans
+            if x.health == INF
+                x.swap = REC
             end
-        end
-        # for i in infected
-        #     contact_dynamic2(humans[i], NB, CM, agm)
-        # end
+            if x.swap != UNDEF
+                x.health = x.swap
+                x.swap = UNDEF
+            end
+        end      
+  
+        prev_ctr[t] = length(findall(x -> x.health == INF, humans))  
+        reco_ctr[t] = length(findall(x -> x.health == REC, humans))  
     end    
-    return oldc, _contacts
+     
+    return prev_ctr, reco_ctr, left_ctr, left_inf, beta_ctr
 end
 export main
 
-function setup_contacts(cts)
-    for i = 1:10000
-        ig = humans[i].group                
-        cts[i, :] = rand(NB[ig], 50*50) ## get the number of contacts
+
+function setup_contacts(cts, grps)
+    for i = 1:1000
+        ig = humans[i].group     
+        c =  rand(NB[ig], 50*50) ## get the number of contacts          
+        cts[i, :] = c
+        ds = Categorical(CM[ig])
+        gpw = rand.(ds, c) ## from which group.
+        grps[i,:] = gpw
     end
-    return cts
 end
 export setup_contacts
 
-@inline function edit_contacts(rowid, cts)
-    cts[rowid, :] = rand(NB[humans[rowid].group ], 50*50)
+function setup_agm(agm)
+    for i = 1:15
+        agm[i] = shuffle(findall(x -> x.group == i, humans))
+    end
+end
+export setup_agm
+
+
+@inline function edit_contacts(rowid, cts, gps)
+    ## the person has switched groups, and so their contact patterns have changed
+    ig = humans[rowid].group
+    c = rand(NB[ig], 50*50)
+    #cts[rowid, :] = c
+    ds = Categorical(CM[ig])
+    gpw = rand.(ds, c) ## from which group.
+    #gps[rowid,:] = gpw
 end
 export edit_contacts
 
 function insert_infected(cnt) 
-    h = rand(1:10000, cnt)
+    h = sample(1:1000, cnt; replace = false)
     for i in h 
         humans[i].health = INF
     end
+    println("inserted: $(length(findall(x -> x.health == INF, humans)))")
 end
 export insert_infected
+
 
 function init_human(x::Human, idx = 0)
     x.idx = idx
@@ -121,7 +167,7 @@ function init_human(x::Human, idx = 0)
     x.group = rand(agedist)     
     x.age = rand(agebraks[x.group])
     # age of death in group 15 
-    x.ageofdeath = rand(3500:3750)   ## could happen that x.ageofdeath < x.age in which case they will die right away
+    x.ageofdeath = 4250 #rand(3451:4250)   ## could happen that x.ageofdeath < x.age in which case they will die right away
     x.vaccinated = false
     x.vaccinetime = 9999 
 end
@@ -137,7 +183,7 @@ end
 export replace_human
 
 function init_population()    
-    @inbounds for i = 1:10000
+    @inbounds for i = 1:1000
         humans[i] = Human()   ## create an empty human
         init_human(humans[i], i) ## initialize the human
     end
@@ -156,29 +202,38 @@ end
 export get_group
 
 function age_and_vaccinate(x::Human)
-    grp_changed = false
+    # this function takes care of all the logic at the "end" of week
+    
     cnt_vaccinated = 0
-    grp = x.group
+    ## have they left the system and were they infected when they left the system
+    left_system = false
+    left_infect = false
+    grp_changed = false
+    
+    oldgrp = x.group
     newage = x.age + 1
+   
 
     if newage > x.ageofdeath
+        left_system = true
+        if x.health == INF
+            left_infect = true
+        end
         replace_human(x)
-        ls = true
     else 
         x.age = newage
         x.group = get_group(newage) 
     end
-    # group has changed
-    if x.group != grp 
+    # group has changed, let the main() function know
+    if x.group != oldgrp 
         grp_changed = true
     end
-
+    # vaccinate the individual if it's their time
     if newage == x.vaccinetime
         x.vaccinated == true
-        cnt_vaccinated += 1
-    end
-   
-    return grp_changed, cnt_vaccinated
+    end   
+    ## do not change this order as tests depend on it
+    return grp_changed, left_system, left_infect
 end
 export age_and_vaccinate
 
@@ -202,7 +257,8 @@ function contact_matrix()
     CM[15] = [0.0202, 0.0276, 0.0508, 0.0539, 0.0315, 0.0513, 0.055, 0.0639, 0.086, 0.089, 0.0677, 0.0594, 0.0755, 0.084, 0.1842]
     return CM
 end
-export contact_matrix
+const CM = contact_matrix()
+export contact_matrix, CM
 
 function negative_binomials()
     ##Age group's mean
@@ -281,30 +337,32 @@ function negative_binomials()
     nc15 = NegativeBinomial(r, p)
     return nc1,nc2,nc3,nc4,nc5,nc6,nc7,nc8,nc9,nc10,nc11,nc12,nc13,nc14,nc15
 end
-export negative_binomials
+const NB = negative_binomials()
+export negative_binomials, NB
 
-function contact_dynamic2(x, NB, CM, agm)
+function contact_dynamic2(x, beta, agm)
     ## right away check if x is infected, otherwise no use.
-            
-    ig = x.group            
-    _contacts = rand(NB[ig]) ## get the number of contacts
-    ds = Categorical(CM[ig])
-    _groups = rand(ds, _contacts) ## from which group.
+    #c = cts[x.idx, t]
+    cnt_infected = 0
+    if x.health == INF 
+        ig = x.group
+        c = rand(NB[ig]) # sample the number of contacts
+        ds = Categorical(CM[ig]) # get a group matrix distribution
+        gpw = rand(ds, c) ## sample which groups the contacts are from
 
-    u=unique(_groups)
-    d=Dict([(i,count(x->x==i,_groups)) for i in u])
-    for (k, v) in d
-        possagents = findall(x -> x == k, agm)
-        meetagents = rand(possagents, v) 
-        for j in meetagents
-            if humans[j].health == SUSC 
-                if rand() < 0.5 
-                    #println("beta not implemented yet")
-                    humans[j].health = INF
+        #println("meeting $(length(gpw)) people in groups")
+        for v in gpw
+            meet = rand(agm[v])
+            #println("for group $v, met $meet")            
+            if humans[meet].health == SUSC 
+                if rand() < beta
+                    humans[meet].swap = INF
+                    cnt_infected += 1
                 end
-            end 
-        end
-    end    
+            end
+        end    
+    end   
+    return cnt_infected
 end
 export contact_dynamic2
 
