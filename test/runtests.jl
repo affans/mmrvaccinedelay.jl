@@ -18,17 +18,44 @@ const vax_coverage = 0.8
         @test x.health == mmr.SUSC
     end
     
-    ## test if the insert_infected function really works.
+    ## test if the init_infected function really works.
     mmr.init_population()
-    mmr.insert_infected(1)
+    mmr.init_infected(1)
     a = findall(x -> x.health == mmr.INF, mmr.humans)
     @test length(a) == 1
 
-    ## test if the insert_infected dosn't sample the sample person twice.
+    ## test if the init_infected dosn't sample the sample person twice.
     mmr.init_population()
-    mmr.insert_infected(100)
+    mmr.init_infected(100)
     a = findall(x -> x.health == mmr.INF, mmr.humans)
     @test length(a) == 100
+
+
+    mmr.init_population()
+    for x in mmr.humans 
+        @test x.protection == 0.0
+        @test x.health == mmr.SUSC
+    end
+    mmr.init_herdimmunity()
+    a1 = findall(x -> x.health == mmr.SUSC && x.age < 26, mmr.humans)
+    a2 = findall(x -> x.health == mmr.SUSC && x.age >= 26 && x.age < 50, mmr.humans)
+    a3 = findall(x -> x.health == mmr.REC, mmr.humans)
+    
+    for i in a1 
+        @test mmr.humans[i].protection == 1.0
+        @test mmr.humans[i].vaccinated == false ## extra test
+    end
+    for i in a2
+        @test mmr.humans[i].protection == 0.5
+        @test mmr.humans[i].vaccinated == false ## extra test
+    end
+    for i in a3
+        @test mmr.humans[i].protection == 1.0
+        @test mmr.humans[i].vaccinated == false ## extra test
+    end
+    p = findall(x -> x.age >= 200, mmr.humans)
+    @test isapprox(length(a3)/length(p), 0.80; atol=0.1)
+    
 end
 
 @testset "AGE" begin
@@ -36,13 +63,13 @@ end
     ## check if age_and_vaccinate function (age only)
     ## checks if age is incremented properly
     ## and verifies dead people are replaced properly. 
-    a1 = [mmr.humans[i].age for i = 1:1000]
+    a1 = [mmr.humans[i].age for i = 1:gridsize]
     ls = zeros(Bool, gridsize) #contains whether they have left the system
     for i = 1:gridsize
         r = mmr.age_and_vaccinate(mmr.humans[i])
         ls[i] = r[2] # r[2] contains whether they have left the system
     end
-    a2 = [mmr.humans[i].age for i = 1:1000]
+    a2 = [mmr.humans[i].age for i = 1:gridsize]
     for i = 1:gridsize
         @test (a2[i] == a1[i] + 1) || a2[i] == 0
     end
@@ -175,13 +202,27 @@ end
 end
 
 @testset "VAX" begin
+    ## test that all vaccine time is above 52 weeks
     mmr.init_population()
-    mmr.init_vaccination(vax_coverage)
+    mmr.init_vaccination()
     v = 0
     for x in mmr.humans
-        if x.vaccinetime != 9999
+        if x.vaccinated 
+            @test x.age >= 50 && x.age < 200
+            @test x.health == mmr.SUSC
             v += 1
         end
     end
-    @test isapprox(v/gridsize, vax_coverage; atol=0.1)
+    a1 = length(findall(x -> x.age >= 50 && x.age < 200, mmr.humans))
+    @test isapprox(v/a1, vax_coverage; atol=0.1)
+
+    mmr.init_population()
+    mmr.init_herdimmunity()
+    mmr.init_vaccination()
+    for t in 1:gridtime
+        for x in mmr.humans
+            mmr.age_and_vaccinate(x)
+        end
+    end
+    
 end
