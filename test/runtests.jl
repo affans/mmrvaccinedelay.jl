@@ -1,10 +1,10 @@
 using mmrvaccinedelay
 using Test
 
-
 const mmr = mmrvaccinedelay
 const gridsize = length(mmr.humans)
 const gridtime = 50*50
+const vax_coverage = 0.8
 @testset "INIT" begin
     mmr.init_population()
     x = mmr.humans[1]
@@ -12,13 +12,26 @@ const gridtime = 50*50
     @test x.vaccinetime == 9999
     @test x.vaccinated == false
     @test length(findall(x -> x == undef, mmr.humans)) == 0 ## check for proper initialization
-    for x in humans
+    for x in mmr.humans
         @test x.ageofdeath == 4250
+        @test x.swap == mmr.UNDEF
+        @test x.health == mmr.SUSC
     end
+    
+    ## test if the insert_infected function really works.
+    mmr.init_population()
+    mmr.insert_infected(1)
+    a = findall(x -> x.health == mmr.INF, mmr.humans)
+    @test length(a) == 1
+
+    ## test if the insert_infected dosn't sample the sample person twice.
+    mmr.init_population()
+    mmr.insert_infected(100)
+    a = findall(x -> x.health == mmr.INF, mmr.humans)
+    @test length(a) == 100
 end
 
 @testset "AGE" begin
-    
     mmr.init_population()    
     ## check if age_and_vaccinate function (age only)
     ## checks if age is incremented properly
@@ -52,10 +65,7 @@ end
         oldgrp = x.group
         r = mmr.age_and_vaccinate(x)
         @test r[1] == true  ## test if the age_and_vaccinate returns true for group change
-        # if r[1] != true             
-        #     println("r value = $(r[1]), oldage = $oldage, old group = $oldgrp, in loop group: $grp")
-        #     #dump(x)
-        # end
+     
         if grp < 15  ## if group is less than 15 .. they won't be reset
             @test x.age == oldage + 1
             @test x.group == oldgrp + 1
@@ -132,4 +142,46 @@ end
     mmr.setup_agm(_agm)
     @test 1 ∉ _agm[1] # human changed group so should not in the first bin
     @test 1 ∈ _agm[2]
+end
+
+@testset "SWAPS" begin
+
+    ## This tests whether the person's swaps are set properly.
+    ## secondary tests makes sure if person isn't infected, they can't transmit the disease even with beta = 1
+    mmr.init_population()
+    x = mmr.humans[1]            # find a human
+    x.swap = mmr.INF             # set SWAP to infected
+    mmr.update_swaps()           # update swap
+    @test x.swap == mmr.UNDEF    # tests whether swap happened
+    @test x.health == mmr.INF
+    # prep for the loop
+    _agm = Vector{Vector{Int64}}(undef, 15)
+    mmr.setup_agm(_agm)
+    # go through one week and see what happens after 
+    for i in 1:gridsize
+        cntinf = mmr.contact_dynamic2(mmr.humans[i], 1.0, _agm)
+        # we only made the first human infected, so the number of secondary infections should be zero for everyone else
+        # @test cntinf > 0 ## this could fail.... if number of contacts is zero      
+    end 
+    @test x.health == mmr.INF    # human[1] is still infected 
+    mmr.update_swaps()           # this should move their health to REC
+    @test x.health == mmr.REC    # test whether it does
+    @test x.swap == mmr.UNDEF
+    # test the population to see only one recovered
+    @test 1 == length(findall(x -> x.health == mmr.REC, mmr.humans))
+    # test the population to find all other infecteds. 
+    @test 0 == length(findall(x -> x.swap != mmr.UNDEF, mmr.humans)) # no one should have a swap set
+    @test length(findall(x -> x.health == mmr.INF, mmr.humans)) >= 0 # no one should have a swap set
+end
+
+@testset "VAX" begin
+    mmr.init_population()
+    mmr.init_vaccination(vax_coverage)
+    v = 0
+    for x in mmr.humans
+        if x.vaccinetime != 9999
+            v += 1
+        end
+    end
+    @test isapprox(v/gridsize, vax_coverage; atol=0.1)
 end
