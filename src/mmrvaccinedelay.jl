@@ -213,9 +213,9 @@ export init_infected
 @inline function update_swaps()
     # update swaps
     @inbounds for x in humans
-        # if x.health == INF
-        #     x.swap = REC
-        # end
+        if x.health == INF
+            x.swap = REC
+        end
         if x.swap != UNDEF
             x.health = x.swap
             x.swap = UNDEF
@@ -314,8 +314,8 @@ function contact_dynamic2(x, beta, agm)
         @inbounds for v in gpw
             if length(agm[v]) > 0
                 meet = rand(agm[v])
-                y = humans[meet]  
-                if rand() < beta*(1 - y.protection)
+                y = humans[meet]              
+                if y.health == SUSC && rand() < beta*(1 - y.protection)
                     y.swap = INF
                     cnt_infected += 1
                 end                
@@ -357,13 +357,12 @@ function negative_binomials()
     AgeMean = [10.21, 14.81, 18.22, 17.58, 13.57, 13.57, 14.14, 14.14, 13.83, 13.83, 12.3, 12.3, 9.21, 9.21, 6.89]
     AgeSD = [7.65, 10.09, 12.27, 12.03, 10.6, 10.6, 10.15, 10.15, 10.86, 10.86, 10.23, 10.23, 7.96, 7.96, 5.83]
 
-    nbinoms = Vector{NegativeBinomial{Float64}}(undef, 15)
-    for i = 1:15
-        p = 1 - (AgeSD[i]^2-AgeMean[i])/(AgeSD[i]^2)
-        r = AgeMean[i]^2/(AgeSD[i]^2-AgeMean[i])
-        nbinoms[i] =  NegativeBinomial(r, p)
-    end
-
+    # nbinoms = Vector{NegativeBinomial{Float64}}(undef, 15)
+    # for i = 1:15
+    #     p = 1 - (AgeSD[i]^2-AgeMean[i])/(AgeSD[i]^2)
+    #     r = AgeMean[i]^2/(AgeSD[i]^2-AgeMean[i])
+    #     nbinoms[i] =  NegativeBinomial(r, p)
+    # end
     p = 1 - (AgeSD[1]^2-AgeMean[1])/(AgeSD[1]^2)
     r = AgeMean[1]^2/(AgeSD[1]^2-AgeMean[1])
     nc1 = NegativeBinomial(r, p)
@@ -429,28 +428,5 @@ end
 const NB = negative_binomials()
 export negative_binomials, NB
 
-## deprecated functions
-function setup_contacts(cts, grps)
-    @inbounds for i = 1:gridsize
-        ig = humans[i].group     
-        c =  rand(NB[ig], 50*50) ## get the number of contacts          
-        cts[i, :] = c
-        ds = Categorical(CM[ig])
-        gpw = rand.(ds, c) ## from which group.
-        grps[i,:] = gpw
-    end
-end
-
-@inline function edit_contacts(rowid, cts, gps)
-    ## the person has switched groups, and so their contact patterns have changed
-    ig = humans[rowid].group
-    c = rand(NB[ig], 50*50)
-    #cts[rowid, :] = c
-    ds = Categorical(CM[ig])
-    gpw = rand.(ds, c) ## from which group.
-    #gps[rowid,:] = gpw
-end
-export setup_contacts, edit_contacts
-## end deprecated
 
 end # module
