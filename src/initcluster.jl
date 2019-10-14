@@ -16,6 +16,7 @@ using UnicodePlots
 using Dates
 
 using mmrvaccinedelay
+const mmr=mmrvaccinedelay
 
 ## multi core. 
 ##addprocs(4; exeflags="--project=.")

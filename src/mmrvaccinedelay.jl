@@ -24,7 +24,8 @@ using Random
 mutable struct Human ## mutable structs are stored on the heap 
     idx::Int64
     health::HEALTH
-    swap::HEALTH     
+    swap::HEALTH   
+    infweek::Int64  
     age::Int64          # in weeks 
     ageofdeath::Int64   # in weeks
     group::Int64     
@@ -47,7 +48,7 @@ end
 end
 
 # global system settings 
-const gridsize = 5000
+const gridsize = 10000
 const agedist =  Categorical(@SVector [0.053, 0.055, 0.052, 0.056, 0.067, 0.07, 0.07, 0.068, 0.064, 0.066, 0.072, 0.073, 0.064, 0.054, 0.116])
 const agebraks_old = @SVector [0:4, 5:9, 10:14, 15:19, 20:24, 25:29, 30:34, 35:39, 40:44, 45:49, 50:54, 55:59, 60:64, 65:69, 70:85]
 const agebraks = @SVector [0:200, 201:450, 451:700, 701:950, 951:1200, 1201:1450, 1451:1700, 1701:1950, 1951:2200, 2201:2450, 2451:2700, 2701:2950, 2951:3200, 3201:3450, 3451:4250]
@@ -61,45 +62,41 @@ export HEALTH, humans, agedist, agebraks, P
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
 function main(simnumber=1, hic=0.8, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime=2500)  # P is model parameters
-    # main entry of the simulation
-    # take the arguments and put them as the parameters so other functions can read them
+    # main entry point of the simulation
+    Random.seed!(simnumber)    
+    # set the global parameters of the model
     P.herdimmunity_coverage = hic
     P.vaccination_coverage = vc
     P.beta0 = b0
     P.beta1 = b1
     P.initial_infected = ii
-    Random.seed!(simnumber)
+    P.sim_time = mtime   
+    ## data collection variables, might not need all of them. 
+    vacc_ctr = zeros(Int64, P.sim_time)   ## counts how many vaccinated at end of week   
+    inft_ctr = zeros(Int64, P.sim_time)   ## how many people got infected in a week.    
+    prev_ctr = zeros(Int64, P.sim_time)   ## how many people remained infected by end of week (essentiall inft - people who left)
+    reco_ctr = zeros(Int64, P.sim_time)   ## how many people recovered by end of week
+    left_ctr = zeros(Int64, P.sim_time)   ## how many people left the system by end of week
+    left_inf = zeros(Int64, P.sim_time)   ## how many infected people left the system by end of week
+    susc_ctr = zeros(Int64, P.sim_time)   ## how many susceptible at each week
+    meet_ctr = zeros(Int64, P.sim_time)   ## how many contacts each week
+    beta_ctr = zeros(Float64, P.sim_time)
     init_population()
     init_herdimmunity()
     init_vaccination()
     init_infected()
-    P.sim_time = mtime
-    maxtime = P.sim_time
-    ## data collection variables, number of elements is the time units. 
-    vacc_ctr = zeros(Int64, maxtime)   ## counts how many vaccinated at end of week   
-    inft_ctr = zeros(Int64, maxtime)   ## how many people got infected in a week.    
-    prev_ctr = zeros(Int64, maxtime)   ## how many people remained infected by end of week (essentiall inft - people who left)
-    reco_ctr = zeros(Int64, maxtime)   ## how many people recovered by end of week
-    left_ctr = zeros(Int64, maxtime)   ## how many people left the system by end of week
-    left_inf = zeros(Int64, maxtime)   ## how many infected people left the system by end of week
-    susc_ctr = zeros(Int64, maxtime)
-    ## these matrices are used to calculate contact patterns. 
-    fcm = zeros(Int64, 15, 15)   ## how many times did susc/sick contact group i meet contact group j meet but failed to infect.
-    cmg = zeros(Int64, 15, 15)   ## how many times did contact group i meet with contact group j
-    ## we setup an array for who belongs to each group
-    _agm = Vector{Vector{Int64}}(undef, 15)
-    setup_agm(_agm) ## fill this array
-    # deprecated
-    #_contacts = zeros(Int64, gridsize, 50*50)
-    #_groups= Matrix{Vector{Int64}}(undef, gridsize, 2500)
-    beta0 = P.beta0
-    beta1 = 0 #P.beta1
-    betas = [beta0*(1+ beta1*sin(2*pi*t/26)) for t = 1:maxtime]
-    for t = 1:maxtime        
+    ## setup seasonal betas, if P.beta1 = 0 then we have fixed beta
+    betas = [P.beta0*(1+P.beta1*sin(2*pi*t/50)) for t = 1:P.sim_time]
+    for t = 1:P.sim_time        
+        prev_ctr[t] = length(findall(x -> x.health == INF, humans))  
+        reco_ctr[t] = length(findall(x -> x.health == REC, humans))
+        susc_ctr[t] = length(findall(x -> x.health == SUSC, humans))
+        beta_ctr[t] = betas[t]
         for j in 1:gridsize            
             x = humans[j]
-            dtc = contact_dynamic2(x, betas[t], _agm ) 
+            dtc, c = contact_dynamic2(x, betas[t]) 
             inft_ctr[t] += dtc
+            meet_ctr[t] += c
         end             
         for j in 1:gridsize
             x = humans[j]            
@@ -108,51 +105,59 @@ function main(simnumber=1, hic=0.8, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime=2500) 
             left_inf[t] += li  
             vacc_ctr[t] += vc    
         end
-        update_swaps()
-        setup_agm(_agm)
-        prev_ctr[t] = length(findall(x -> x.health == INF, humans))  
-        reco_ctr[t] = length(findall(x -> x.health == REC, humans))
-        susc_ctr[t] = length(findall(x -> x.health == SUSC, humans))  
+        update_swaps()          
     end   
-    dt = DataFrame(susc=susc_ctr, inft=inft_ctr, prev=prev_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr)
+    dt = DataFrame(susc=susc_ctr, inft=inft_ctr, prev=prev_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr, beta=beta_ctr, meet=meet_ctr)
     return dt
 end
 export main
 
-function setup_agm(agm)
-    # filters humans according to their age groups. 
-    for i = 1:15
-        agm[i] = findall(x -> x.group == i, humans)
-    end
-end
-export setup_agm
-
 ## init functions
-function init_human(x::Human, idx = 0)
+function reset_human(x::Human, idx = 0)
     x.idx = idx
     x.health = SUSC
     x.swap = UNDEF 
+    x.infweek = 0
     x.group = rand(agedist)     
     x.age = rand(agebraks[x.group])
-    # age of death in group 15 
-    #x.ageofdeath = 4250 #rand(3451:4250)   ## could happen that x.ageofdeath < x.age in which case they will die right away
-    x.ageofdeath = 4250
+    x.ageofdeath = calc_ageofdeath(x.age)
     x.vaccinated = false
     x.vaccinetime = 9999
     x.protection = 0
 end
-export init_human
+export reset_human
+
+# function setup_agedistribution(x::Human)
+#     x.group = rand(agedist)     
+#     x.age = rand(agebraks[x.group])
+#     x.ageofdeath = calc_ageofdeath(x.age)
+#     return 
+# end
+
+function calc_ageofdeath(age)
+    ## given a age, what is the chance they will die the year after. 
+    ## set a default age of death 
+    rt = 85
+    ageinyears = Int(floor(age/50))    
+    for age = ageinyears:84
+        getprobdeath = death_dist[age + 1]
+        #println("prob: $getprobdeath")
+        if rand() < getprobdeath
+            #println(age)
+            rt = age + 1
+            break
+        end
+    end
+    return rt*50    
+end
 
 function newborn(x::Human)
-    init_human(x, x.idx)
+    reset_human(x, x.idx)
     x.age = 0
     x.group = 1
-    x.ageofdeath = 4250 #rand(3451:4250)   ## could happen that x.ageofdeath < x.age in which case they will die right away
-    x.vaccinated = false
-    x.vaccinetime = 9999
-    x.protection = 1.0  
+    apply_protection(x) ## should apply maternal immunity
     if rand() < P.vaccination_coverage           
-        x.vaccinetime = Int(round(rand(delay_distribution)))
+        x.vaccinetime = 50 + Int(round(rand(delay_distribution)))
     end 
 end
 export newborn
@@ -160,7 +165,7 @@ export newborn
 function init_population()    
     @inbounds for i = 1:gridsize
         humans[i] = Human()   ## create an empty human
-        init_human(humans[i], i) ## initialize the human
+        reset_human(humans[i], i) ## reset the human
     end
 end
 export init_population
@@ -210,16 +215,32 @@ end
 export init_infected
 
 ## human functions 
-@inline function update_swaps()
+function update_swaps()
     # update swaps
     @inbounds for x in humans
         if x.health == INF
-            x.swap = REC
-        end
-        if x.swap != UNDEF
-            x.health = x.swap
+            if rand() < 1.0
+                x.swap = REC
+            else
+                x.swap = SUSC
+            end            
+        end        
+        if x.swap == SUSC
+            x.health = SUSC
             x.swap = UNDEF
         end
+        if x.swap == INF
+            if x.infweek == 0
+                x.health = x.swap
+                x.swap = UNDEF
+            else 
+                x.infweek = 0
+            end
+        end     
+        if x.swap == REC
+            x.health = x.swap
+            x.swap = UNDEF            
+        end        
     end  
 end
 export update_swaps
@@ -239,12 +260,12 @@ function apply_protection(x)
     p = 0.0
     age = x.age
     if x.health == SUSC 
-        # if age < 26
-        #     p = 1.0
-        # end    
-        # if age >= 26 && age < 50
-        #     p = 0.5
-        # end
+        if age < 26
+            p = 1.0
+        end    
+        if age >= 26 && age < 50
+            p = 0.5
+        end
         if x.vaccinated 
             p = 0.95
         end
@@ -273,9 +294,7 @@ function age_and_vaccinate(x::Human)
 
     if newage > x.ageofdeath
         left_system = true
-        if x.health == INF
-            left_infect = true
-        end
+        x.health == INF && (left_infect = true)
         newborn(x)
     else 
         x.age = newage
@@ -301,32 +320,49 @@ function age_and_vaccinate(x::Human)
 end
 export age_and_vaccinate
 
-
-function contact_dynamic2(x, beta, agm)
+function contact_dynamic2(x, beta)
     ## right away check if x is infected, otherwise no use.
     #c = cts[x.idx, t]
     cnt_infected = 0
-    if x.health == INF
-        ig = x.group
-        c = sum(rand(NB[ig], 7)) # sample the number of contacts
-        ds = Categorical(CM[ig]) # get a group matrix distribution
-        gpw = rand(ds, c) ## sample which groups the contacts are from
-        @inbounds for v in gpw
-            if length(agm[v]) > 0
-                meet = rand(agm[v])
-                y = humans[meet]              
-                if y.health == SUSC && rand() < beta*(1 - y.protection)
-                    y.swap = INF
-                    cnt_infected += 1
-                end                
-            end                         
-        end
+    cnt_meet = 0
+    cnt_meet_susc = 0
+    if x.health == INF  ## note: flipping this around to SUSC didnt make a difference to results, only slowed it down
+        ig = x.group                # get the infected person's group
+        cnt_meet = rand(NB[ig])     # sample the number of contacts
+        # distribute cnt_meet to different groups based on contact matrix. 
+        # these are not probabilities, but proportions. be careful. 
+        # going from cnt_meet to the gpw array might remove a contact or two due to rounding. 
+        gpw = Int.(round.(CM[ig]*cnt_meet)) 
+        # let's stratify the human population in it's age groups. 
+        # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments
+        agm = Vector{Vector{Int64}}(undef, 15)
+        for grp = 1:15
+            agm[grp] = findall(x -> x.health == SUSC && x.group == grp, humans)    
+        end        
+        # enumerate over the 15 groups and randomly select contacts from each group
+        for (i, g) in enumerate(gpw)           
+            if length(agm[i]) > 0 
+                meet = rand(agm[i], g)    # sample 'g' number of people from this group  
+                for j in meet             # loop one by one to check disease transmission
+                    y = humans[j] 
+                    if rand() < beta*(1 - y.protection)
+                        y.swap = INF      # set the swap. 
+                        if rand() < 0.5  
+                            y.infweek = 0 
+                        else 
+                            y.infweek = 1
+                        end
+                        cnt_infected += 1
+                    end                     
+                end
+            end
+        end        
     end
-    return cnt_infected
+    return cnt_infected, cnt_meet
 end
 export contact_dynamic2
 
-## fixed distribution functions
+#### DISTRIBUTIONS
 function contact_matrix()
     CM = Array{Array{Float64, 1}, 1}(undef, 15)
     CM[1] = [0.2287, 0.1153, 0.0432, 0.0254, 0.0367, 0.0744, 0.1111, 0.0992, 0.0614, 0.0391, 0.0414, 0.0382, 0.032, 0.0234, 0.0305]
@@ -428,5 +464,18 @@ end
 const NB = negative_binomials()
 export negative_binomials, NB
 
+## see excel file in measles folder for death distribution
+const death_dist = [0.006799, 0.000483, 0.000297, 0.000224, 0.000188, 0.000171, 0.000161, 0.000151, 0.000136, 
+        0.000119, 0.000106, 0.000112, 0.000149, 0.000227, 0.000337, 0.00046, 0.000579, 0.000684, 
+        0.000763, 0.000819, 0.000873, 0.000926, 0.00096, 0.000972, 0.000969, 0.00096, 0.000954, 
+        0.000952, 0.000958, 0.000973, 0.000994, 0.001023, 0.001063, 0.001119, 0.001192, 0.001275, 
+        0.001373, 0.001493, 0.001634, 0.001788, 0.001945, 0.002107, 0.002287, 0.002494, 0.002727,
+        0.002982, 0.003246, 0.00352, 0.003799, 0.004088, 0.004404, 0.00475, 0.005113, 0.005488, 
+        0.005879, 0.006295, 0.006754, 0.00728, 0.007903, 0.008633, 0.009493, 0.010449, 0.011447, 
+        0.012428, 0.013408, 0.014473, 0.015703, 0.017081, 0.018623, 0.020322, 0.022104, 0.024023, 
+        0.026216, 0.028745, 0.031561, 0.034427, 0.037379, 0.040756, 0.044764, 0.049395, 0.054471, 
+        0.059772, 0.065438, 0.071598, 0.078516, 0.085898, 0.093895, 0.102542, 0.111875, 0.121928, 
+        0.132733, 0.144318, 0.156707, 0.169922, 0.183975, 0.198875, 0.21462, 0.231201, 0.2486, 0.266786, 1.0] 
+export death_dist
 
 end # module

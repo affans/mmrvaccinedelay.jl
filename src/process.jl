@@ -23,12 +23,16 @@ function single(beta0, beta1, mtime, ii, hic, vc)
     ## create yearly average
     dd = d |> @groupby(_.year) |>
         @map({year=key(_), 
-              avg_susc=mean(_.susc),
-              avg_inft=mean(_.inft), 
-              avg_prev=mean(_.prev), 
-              avg_reco=mean(_.reco), 
-              avg_leftsys=mean(_.leftsys), 
-              avg_leftinf=mean(_.leftinf), 
-              avg_vacc=mean(_.vacc)}) |> DataFrame
-    return dd
+              cnt=length(_),
+              susc=mean(_.susc),
+              inft=mean(_.inft), 
+              prev=mean(_.prev), 
+              reco=mean(_.reco), 
+              leftsys=mean(_.leftsys), 
+              leftinf=mean(_.leftinf), 
+              vacc=mean(_.vacc),
+              beta=mean(_.beta),
+              meet=mean(_.meet)}) |> DataFrame
+    return dd   
 end
+

@@ -144,31 +144,62 @@ end
             oldid = x.idx
             r = mmr.age_and_vaccinate(x)
             if r[2] == true
-                @test x.age == 0 
-                @test x.group == 1
-                @test oldid == x.idx 
                 wd[t] += 1
             end
         end
     end
     @test sum(wd) == 0
+
    
-    # test agm vector. this is used in the contact patterns. 
-    mmr.init_population()
-    x = mmr.humans[1]
-    x.age = 0
-    x.group = 1
-    _agm = Vector{Vector{Int64}}(undef, 15)
-    mmr.setup_agm(_agm)
-    @test 1 ∈ _agm[1] ## test the manual human above. 
-    for x in mmr.humans  # test everyone
-        @test x.idx ∈ _agm[x.group]         
-    end
-    x.age = 201
-    x.group = mmr.get_group(x.age)
-    mmr.setup_agm(_agm)
-    @test 1 ∉ _agm[1] # human changed group so should not in the first bin
-    @test 1 ∈ _agm[2]
+    # # test agm vector. this is used in the contact patterns. 
+    # mmr.init_population()
+    # x = mmr.humans[1]
+    # x.age = 0
+    # x.group = 1
+    # _agm = Vector{Vector{Int64}}(undef, 15)
+    # mmr.setup_agm(_agm)
+    # @test 1 ∈ _agm[1] ## test the manual human above. 
+    # for x in mmr.humans  # test everyone
+    #     @test x.idx ∈ _agm[x.group]         
+    # end
+    # x.age = 201
+    # x.group = mmr.get_group(x.age)
+    # mmr.setup_agm(_agm)
+    # @test 1 ∉ _agm[1] # human changed group so should not in the first bin
+    # @test 1 ∈ _agm[2]
+
+    # ## agm
+    # mmr.init_population()
+    # _agm = Vector{Vector{Int64}}(undef, 15)
+    # mmr.setup_agm(_agm) ## fill this array
+    # @test sum(length.(_agm))  == gridsize
+    # for i = 1:10 ## test this 5000 times to make sure the sum remains the same...
+    #     for x in mmr.humans
+    #         r = mmr.age_and_vaccinate(x)
+    #     end
+    #     @test sum(length.(_agm))  == gridsize
+    # end    
+
+    # ## agm should only contain susceptibles. 
+    # mmr.init_population()
+    # _agm = Vector{Vector{Int64}}(undef, 15)
+    # mmr.setup_agm(_agm) ## fill this array
+    # for ag in _agm
+    #     for g in ag
+    #         @test mmr.humans[g].health == mmr.SUSC
+    #     end
+    # end
+
+    # ## test after aging... 
+    # mmr.init_population()
+    # _agm = Vector{Vector{Int64}}(undef, 15)
+    # mmr.setup_agm(_agm) ## fill this array
+    # for ag in _agm
+    #     for g in ag
+    #         @test mmr.humans[g].health == mmr.SUSC
+    #     end
+    # end
+
 end
 
 @testset "SWAPS" begin
@@ -178,6 +209,7 @@ end
     mmr.init_population()
     x = mmr.humans[1]            # find a human
     x.swap = mmr.INF             # set SWAP to infected
+    @test x.infweek == 0
     mmr.update_swaps()           # update swap
     @test x.swap == mmr.UNDEF    # tests whether swap happened
     @test x.health == mmr.INF
@@ -196,9 +228,9 @@ end
     @test x.swap == mmr.UNDEF
     # test the population to see only one recovered
     @test 1 == length(findall(x -> x.health == mmr.REC, mmr.humans))
-    # test the population to find all other infecteds. 
-    @test 0 == length(findall(x -> x.swap != mmr.UNDEF, mmr.humans)) # no one should have a swap set
-    @test length(findall(x -> x.health == mmr.INF, mmr.humans)) >= 0 # no one should have a swap set
+    @test length(findall(x -> x.health == mmr.INF, mmr.humans)) >= 0 
+
+    ## to do, run the swap function with infweek set to 2. 
 end
 
 @testset "VAX" begin
@@ -216,13 +248,23 @@ end
     a1 = length(findall(x -> x.age >= 50 && x.age < 200, mmr.humans))
     @test isapprox(v/a1, vax_coverage; atol=0.1)
 
+    # we test the apply_protection at different stages.
+    # check for herd_immunity. 
     mmr.init_population()
-    mmr.init_herdimmunity()
-    mmr.init_vaccination()
-    for t in 1:gridtime
-        for x in mmr.humans
-            mmr.age_and_vaccinate(x)
+    mmr.init_herdimmunity() 
+    for x in mmr.humans
+        if x.health == mmr.REC 
+            @test x.protection == 1.0
         end
     end
-    
+end
+
+function plot_deathdist()
+    d = zeros(Int64, 1000)
+    for i = 1:1000
+        group = rand(agedist)     
+        age = rand(agebraks[group])
+        d[i] = mmrvaccinedelay.calc_ageofdeath(age)
+    end
+    return d
 end
