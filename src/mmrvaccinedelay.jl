@@ -43,13 +43,14 @@ end
     sim_time::Int64 = 2500  ## 50 years in 1 week intervals, 50 weeks/year. 
     vaccine_onoff::Bool = false
     vaccination_coverage = 0.8
+    vaccination_scenario::String = "fixed"
     beta0 = 0.08
     beta1 = 0.9
     initial_infected::Int64 = 20
 end
 
 # global system settings 
-const gridsize = 5000
+const gridsize = 10000
 const agedist =  Categorical(@SVector [0.053, 0.055, 0.052, 0.056, 0.067, 0.07, 0.07, 0.068, 0.064, 0.066, 0.072, 0.073, 0.064, 0.054, 0.116])
 const agebraks_old = @SVector [0:4, 5:9, 10:14, 15:19, 20:24, 25:29, 30:34, 35:39, 40:44, 45:49, 50:54, 55:59, 60:64, 65:69, 70:85]
 const agebraks = @SVector [0:200, 201:450, 451:700, 701:950, 951:1200, 1201:1450, 1451:1700, 1701:1950, 1951:2200, 2201:2450, 2451:2700, 2701:2950, 2951:3200, 3201:3450, 3451:4250]
@@ -62,13 +63,14 @@ export HEALTH, humans, agedist, agebraks, P
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
-function main(simnumber=1, vaxonoff=false, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime=2500 )  # P is model parameters
+function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.08, b1=0.9, ii=20, mtime=2500 )  # P is model parameters
     # main entry point of the simulation
     Random.seed!(simnumber)    
 
     # set the global parameters of the model
+    P.vaccination_scenario = vs
     P.vaccination_coverage = vc
-    P.vaccine_onoff  = vaxonoff
+    P.vaccine_onoff  = false
     P.beta0 = b0
     P.beta1 = b1
     P.initial_infected = ii
@@ -103,17 +105,17 @@ function main(simnumber=1, vaxonoff=false, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime
         end 
 
         ## start vaccine if t == 400
-        if t == 400 
+        if t == vt 
+            P.vaccine_onoff = true
             init_vaccination(P.vaccination_coverage)
         end
-
 
         prev_ctr[t] = length(findall(x -> x.health == INF, humans))  
         reco_ctr[t] = length(findall(x -> x.health == REC, humans))
         susc_ctr[t] = length(findall(x -> x.health == SUSC, humans))
-        proc_ctr[t] = length(findall(x -> x.health == SUSC && x.protection > 0, humans))
         beta_ctr[t] = betas[t]
-
+        proc_ctr[t] = proc_ctr_update()
+        
         for j in 1:gridsize            
             x = humans[j]
             dtc, c = contact_dynamic2(x, betas[t], agm) 
@@ -129,14 +131,22 @@ function main(simnumber=1, vaxonoff=false, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime
             left_ctr[t] += ls
             left_inf[t] += li  
             vacc_ctr[t] += vc    
-        end
-        
-                        
+        end        
     end   
     dt = DataFrame(susc=susc_ctr, proc=proc_ctr, inft=inft_ctr, prev=prev_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr, beta=beta_ctr, meet=meet_ctr, pop=popu_ctr)
     return dt
 end
 export main
+
+function proc_ctr_update()
+    protected_humans = findall(x -> x.health == SUSC && x.protection > 0, humans)
+    totalprotection = 0.0
+    for i in protected_humans
+        totalprotection += humans[i].protection
+    end
+    return totalprotection
+end
+export proc_ctr_update
 
 ## initialization functions 
 function reset_human(x::Human, idx = 0)
@@ -161,12 +171,13 @@ function newborn(x::Human)
     x.age = 0
     x.group = 1
     x.ageofdeath = calc_ageofdeath(x.age)
-    apply_protection(x) ## should apply maternal immunity
+    ## give vaccination
     if P.vaccine_onoff 
         if rand() < P.vaccination_coverage           
-            x.vaccinetime = 50 + Int(round(rand(delay_distribution)))
+            vaccinate(x)
         end
     end     
+    apply_protection(x) ## should apply maternal immunity
 end
 export newborn
 
@@ -180,6 +191,19 @@ function init_population()
 end
 export init_population
 
+function vaccinate(x::Human)
+    # we don't set x.vaccinated = true here. age function will take care of it.
+    if P.vaccination_scenario == "fixed"
+        x.vaccinetime = 50
+    elseif P.vaccination_scenario == "delay"
+        x.vaccinetime = 50 + Int(round(rand(delay_distribution)))
+    end    
+    if x.age > x.vaccinetime 
+        x.vaccinated = true
+    end
+end
+export vaccinate
+
 function init_vaccination(cov)
     ## everyone between 1 year of age and 4 years of age
     ## will get vaccinated with some efficacy.
@@ -187,8 +211,7 @@ function init_vaccination(cov)
         kids = findall(x -> x.age >= 50 && x.age < 200, humans)
         @inbounds for i in kids
             if rand() < cov        
-                humans[i].vaccinetime = Int(round(rand(delay_distribution)))
-                # we don't set x.vaccinated = true here. age function will take care of it.
+                vaccinate(humans[i])
             end
         end
     end    
@@ -254,8 +277,12 @@ function apply_protection(x)
         if age >= 26 && age < 50
             p = 0.5
         end
-        if x.vaccinated 
-            p = 0.95
+        if x.vaccinated
+            if x.age < 1000
+                p = 0.95
+            else 
+                p = 0.50
+            end
         end
     end    
     if x.health == REC
@@ -288,6 +315,7 @@ function update_swaps(t, popctr)
             x.health = SUSC
             x.swap = UNDEF
             x.ageofdeath = calc_ageofdeath(x.age)
+            x.infweek = 0
         end
         if x.swap == INF
             if x.infweek == 0
@@ -321,7 +349,7 @@ function age_and_vaccinate(x::Human)
     
     if x.age < x.ageofdeath
         x.group = get_group(x.age) 
-        if x.age >= x.vaccinetime # vaccinate the individual if it's their time
+        if x.age == x.vaccinetime # vaccinate the individual if it's their time
             x.vaccinated = true
             vaccinated = true
         end               
