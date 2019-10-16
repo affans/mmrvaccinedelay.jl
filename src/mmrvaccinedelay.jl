@@ -91,6 +91,8 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.08, b1=0.9, ii=20, m
     beta_ctr = zeros(Float64, P.sim_time)
     proc_ctr = zeros(Float64, P.sim_time) 
     popu_ctr = zeros(Int64, P.sim_time)
+    avg4_ctr = zeros(Int64, P.sim_time)
+    avg5_ctr = zeros(Int64, P.sim_time)
 
     init_population()    
     insert_infected(P.initial_infected)
@@ -111,6 +113,8 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.08, b1=0.9, ii=20, m
         end
 
         prev_ctr[t] = length(findall(x -> x.health == INF, humans))  
+        avg4_ctr[t] = length(findall(x -> x.health == INF && x.age <= 200, humans)) 
+        avg5_ctr[t] = length(findall(x -> x.health == INF && x.age > 200, humans)) 
         reco_ctr[t] = length(findall(x -> x.health == REC, humans))
         susc_ctr[t] = length(findall(x -> x.health == SUSC, humans))
         beta_ctr[t] = betas[t]
@@ -133,7 +137,7 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.08, b1=0.9, ii=20, m
             vacc_ctr[t] += vc    
         end        
     end   
-    dt = DataFrame(susc=susc_ctr, proc=proc_ctr, inft=inft_ctr, prev=prev_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr, beta=beta_ctr, meet=meet_ctr, pop=popu_ctr)
+    dt = DataFrame(susc=susc_ctr, proc=proc_ctr, inft=inft_ctr, prev=prev_ctr, avg4=avg4_ctr, avg5=avg5_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr, beta=beta_ctr, meet=meet_ctr, pop=popu_ctr)
     return dt
 end
 export main
@@ -372,7 +376,7 @@ function contact_dynamic2(x, beta, agm)
     cnt_meet_susc = 0
     if x.health == INF  ## note: flipping this around to SUSC didnt make a difference to results, only slowed it down
         ig = x.group                # get the infected person's group
-        cnt_meet = rand(NB[ig])     # sample the number of contacts
+        cnt_meet = sum(rand(NB[ig], 7))     # sample the number of contacts
      
         # distribute cnt_meet to different groups based on contact matrix. 
         # these are not probabilities, but proportions. be careful. 

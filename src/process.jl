@@ -27,6 +27,8 @@ function single(vc, vs, vt, beta0, beta1, ii, mtime)
               pop=mean(_.pop),
               susc=mean(_.susc),
               proc=mean(_.proc),
+              avg4=mean(_.avg4),
+              avg5=mean(_.avg5),
               inft=mean(_.inft), 
               prev=mean(_.prev), 
               reco=mean(_.reco), 
