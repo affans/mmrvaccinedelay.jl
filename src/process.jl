@@ -7,10 +7,10 @@
 
 using Parameters
 
-function single(beta0, beta1, mtime, ii, hic, vc)
+function single(voo, vc, beta0, beta1, ii, mtime)
     # this function runs a set of simulations.
     cd = pmap(1:500) do x
-        main(x, hic, vc, beta0, beta1, ii, mtime)
+        main(x, voo, vc, beta0, beta1, ii, mtime)
     end
     
     for i = 1:500
@@ -25,6 +25,7 @@ function single(beta0, beta1, mtime, ii, hic, vc)
         @map({year=key(_), 
               cnt=length(_),
               susc=mean(_.susc),
+              proc=mean(_.proc),
               inft=mean(_.inft), 
               prev=mean(_.prev), 
               reco=mean(_.reco), 
@@ -35,4 +36,7 @@ function single(beta0, beta1, mtime, ii, hic, vc)
               meet=mean(_.meet)}) |> DataFrame
     return dd   
 end
+
+
+
 

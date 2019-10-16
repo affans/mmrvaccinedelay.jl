@@ -1,15 +1,16 @@
 module mmrvaccinedelay
 
+# removed herd immunity
+# added code for SWAP REC -> SUSC
+# optimized AGM
+# changed init_ functions to have argument parameters
+# optimized the age function and separted functions
+
 # 4 major components
 # weekly unit step, for vaccination delay purposes. 
 # contact patterns. 
 # seasonal beta, use some sort of function with week input
 # age groups, for vaccination and calibration purposes
-
-# to do:
-# contact patterns ... consider a weekly sum 
-# fcm and cmg matrices if needed.
-# rethink vaccine code... test vaccine
 
 using Parameters      ## with julia 1.1 this is now built in.
 using ProgressMeter   ## can now handle parallel with progress_pmap
@@ -40,7 +41,7 @@ end
 @with_kw mutable struct ModelParameters @deftype Float64
     # general parameters
     sim_time::Int64 = 2500  ## 50 years in 1 week intervals, 50 weeks/year. 
-    herdimmunity_coverage = 0.8
+    vaccine_onoff::Bool = false
     vaccination_coverage = 0.8
     beta0 = 0.08
     beta1 = 0.9
@@ -48,7 +49,7 @@ end
 end
 
 # global system settings 
-const gridsize = 10000
+const gridsize = 5000
 const agedist =  Categorical(@SVector [0.053, 0.055, 0.052, 0.056, 0.067, 0.07, 0.07, 0.068, 0.064, 0.066, 0.072, 0.073, 0.064, 0.054, 0.116])
 const agebraks_old = @SVector [0:4, 5:9, 10:14, 15:19, 20:24, 25:29, 30:34, 35:39, 40:44, 45:49, 50:54, 55:59, 60:64, 65:69, 70:85]
 const agebraks = @SVector [0:200, 201:450, 451:700, 701:950, 951:1200, 1201:1450, 1451:1700, 1701:1950, 1951:2200, 2201:2450, 2451:2700, 2701:2950, 2951:3200, 3201:3450, 3451:4250]
@@ -61,16 +62,21 @@ export HEALTH, humans, agedist, agebraks, P
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
-function main(simnumber=1, hic=0.8, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime=2500)  # P is model parameters
+function main(simnumber=1, vaxonoff=false, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime=2500 )  # P is model parameters
     # main entry point of the simulation
     Random.seed!(simnumber)    
+
     # set the global parameters of the model
-    P.herdimmunity_coverage = hic
     P.vaccination_coverage = vc
+    P.vaccine_onoff  = vaxonoff
     P.beta0 = b0
     P.beta1 = b1
     P.initial_infected = ii
     P.sim_time = mtime   
+    
+    ## setup seasonal betas, if P.beta1 = 0 then we have fixed beta
+    betas = [P.beta0*(1+P.beta1*sin(2*pi*t/50)) for t = 1:P.sim_time]    
+    
     ## data collection variables, might not need all of them. 
     vacc_ctr = zeros(Int64, P.sim_time)   ## counts how many vaccinated at end of week   
     inft_ctr = zeros(Int64, P.sim_time)   ## how many people got infected in a week.    
@@ -81,63 +87,131 @@ function main(simnumber=1, hic=0.8, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime=2500) 
     susc_ctr = zeros(Int64, P.sim_time)   ## how many susceptible at each week
     meet_ctr = zeros(Int64, P.sim_time)   ## how many contacts each week
     beta_ctr = zeros(Float64, P.sim_time)
-    init_population()
-    init_herdimmunity()
-    init_vaccination()
-    init_infected()
-    ## setup seasonal betas, if P.beta1 = 0 then we have fixed beta
-    betas = [P.beta0*(1+P.beta1*sin(2*pi*t/50)) for t = 1:P.sim_time]
-    for t = 1:P.sim_time        
+    proc_ctr = zeros(Float64, P.sim_time) 
+    init_population()    
+    insert_infected(P.initial_infected)
+    ## a vector of vectors
+    agm = Vector{Vector{Int64}}(undef, 15)
+    ## start main time loop    
+    for t = 1:P.sim_time         
+        ## update agm
+        for grp = 1:15
+            agm[grp] = findall(x -> x.health == SUSC && x.group == grp, humans)    
+        end 
+
+        ## start vaccine if t == 400
+        if t == 400 
+            init_vaccination(P.vaccination_coverage)
+        end
         prev_ctr[t] = length(findall(x -> x.health == INF, humans))  
         reco_ctr[t] = length(findall(x -> x.health == REC, humans))
         susc_ctr[t] = length(findall(x -> x.health == SUSC, humans))
+        proc_ctr[t] = length(findall(x -> x.health == SUSC && x.protection > 0, humans))
         beta_ctr[t] = betas[t]
         for j in 1:gridsize            
             x = humans[j]
-            dtc, c = contact_dynamic2(x, betas[t]) 
+            dtc, c = contact_dynamic2(x, betas[t], agm) 
             inft_ctr[t] += dtc
             meet_ctr[t] += c
         end             
         for j in 1:gridsize
             x = humans[j]            
-            gc, ls, li, vc = age_and_vaccinate(x)  ## increase age of each agent. vaccinate if neccessary                        
+            ls, li, vc = age_and_vaccinate(x)  ## increase age of each agent. vaccinate if neccessary                        
+            apply_protection(x) # apply their protection level on their new age/vaccination
+
             left_ctr[t] += ls
             left_inf[t] += li  
             vacc_ctr[t] += vc    
         end
-        update_swaps()          
+        update_swaps()                 
     end   
-    dt = DataFrame(susc=susc_ctr, inft=inft_ctr, prev=prev_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr, beta=beta_ctr, meet=meet_ctr)
+    dt = DataFrame(susc=susc_ctr, proc=proc_ctr, inft=inft_ctr, prev=prev_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr, beta=beta_ctr, meet=meet_ctr)
     return dt
 end
 export main
 
-## init functions
+## initialization functions 
 function reset_human(x::Human, idx = 0)
+    # reset a human back to default values.
     x.idx = idx
     x.health = SUSC
     x.swap = UNDEF 
     x.infweek = 0
-    x.group = rand(agedist)     
-    x.age = rand(agebraks[x.group])
-    x.ageofdeath = calc_ageofdeath(x.age)
+    x.group = 1    
+    x.age = 0
+    x.ageofdeath = 1
     x.vaccinated = false
     x.vaccinetime = 9999
     x.protection = 0
 end
 export reset_human
 
-# function setup_agedistribution(x::Human)
-#     x.group = rand(agedist)     
-#     x.age = rand(agebraks[x.group])
-#     x.ageofdeath = calc_ageofdeath(x.age)
-#     return 
-# end
+function newborn(x::Human)
+    # this function resets the human to a default NEW BORN state.
+    # we set the age, applying the correct protection, and set a vaccine time is possible.
+    reset_human(x, x.idx)
+    x.age = 0
+    x.group = 1
+    x.ageofdeath = calc_ageofdeath(x.age)
+    apply_protection(x) ## should apply maternal immunity
+    if P.vaccine_onoff 
+        if rand() < P.vaccination_coverage           
+            x.vaccinetime = 50 + Int(round(rand(delay_distribution)))
+        end
+    end     
+end
+export newborn
+
+function init_population()    
+    @inbounds for i = 1:gridsize
+        humans[i] = Human()              ## create an empty human
+        reset_human(humans[i], i)        ## reset the human
+        apply_agedistribution(humans[i])
+        apply_protection(humans[i])
+    end
+end
+export init_population
+
+function init_vaccination(cov)
+    ## everyone between 1 year of age and 4 years of age
+    ## will get vaccinated with some efficacy.
+    if P.vaccine_onoff
+        kids = findall(x -> x.age >= 50 && x.age < 200, humans)
+        @inbounds for i in kids
+            if rand() < cov        
+                humans[i].vaccinetime = Int(round(rand(delay_distribution)))
+                # we don't set x.vaccinated = true here. age function will take care of it.
+            end
+        end
+    end    
+end
+export init_vaccination
+
+
+## human functions and helper functions
+function apply_agedistribution(x::Human)
+    ## for a human, this random assigns an age group, age, and age of death
+    x.group = rand(agedist)     
+    x.age = rand(agebraks[x.group])
+    x.ageofdeath = calc_ageofdeath(x.age)
+end
+export apply_agedistribution
+
+function insert_infected(num) 
+    ## inserts a number of infected people in the population randomly
+    l = findall(x -> x.health == SUSC, humans)
+    h = sample(l, num; replace = false)
+    @inbounds for i in h 
+        humans[i].health = INF
+    end
+end
+export insert_infected
 
 function calc_ageofdeath(age)
-    ## given a age, what is the chance they will die the year after. 
-    ## set a default age of death 
-    rt = 85
+    ## given a age, what is the chance they will die the year after 
+    ## or any of the following years. 
+    ## based on USA life tables
+    rt = 85 ## set a default age of death 
     ageinyears = Int(floor(age/50))    
     for age = ageinyears:84
         getprobdeath = death_dist[age + 1]
@@ -151,105 +225,10 @@ function calc_ageofdeath(age)
     return rt*50    
 end
 
-function newborn(x::Human)
-    reset_human(x, x.idx)
-    x.age = 0
-    x.group = 1
-    apply_protection(x) ## should apply maternal immunity
-    if rand() < P.vaccination_coverage           
-        x.vaccinetime = 50 + Int(round(rand(delay_distribution)))
-    end 
-end
-export newborn
-
-function init_population()    
-    @inbounds for i = 1:gridsize
-        humans[i] = Human()   ## create an empty human
-        reset_human(humans[i], i) ## reset the human
-    end
-end
-export init_population
-
-function init_herdimmunity()
-    # 80% herd immunity, fully recovered  
-    # 50 week year
-    @inbounds for x in humans
-        if x.age >= 200 
-            if rand() < P.herdimmunity_coverage
-                x.health = REC
-            end
-        end
-        apply_protection(x)
-    end
-end
-export init_herdimmunity
-
-function init_vaccination()
-    ## everyone between 1 year of age and 4 years of age
-    ## will get vaccinated with some efficacy.
-    kids = findall(x -> x.age >= 50 && x.age < 200, humans)
-    @inbounds for i in kids
-        if rand() < P.vaccination_coverage          
-            humans[i].vaccinetime = Int(round(rand(delay_distribution)))
-            if humans[i].age >= humans[i].vaccinetime 
-                humans[i].vaccinated = true
-                apply_protection(humans[i])
-            end
-        end
-    end
-end
-export init_vaccination
-
-function init_infected()
-    init_infected(P.initial_infected)
-end
-
-function init_infected(num) 
-    l = findall(x -> x.health == SUSC, humans)
-    h = sample(l, num; replace = false)
-    @inbounds for i in h 
-        humans[i].health = INF
-    end
-    #println("initial infected: $(length(findall(x -> x.health == INF, humans)))")    
-end
-export init_infected
-
-## human functions 
-function update_swaps()
-    # update swaps
-    @inbounds for x in humans
-        if x.health == INF
-            if rand() < 1.0
-                x.swap = REC
-            else
-                x.swap = SUSC
-            end            
-        end        
-        if x.swap == SUSC
-            x.health = SUSC
-            x.swap = UNDEF
-        end
-        if x.swap == INF
-            if x.infweek == 0
-                x.health = x.swap
-                x.swap = UNDEF
-            else 
-                x.infweek = 0
-            end
-        end     
-        if x.swap == REC
-            x.health = x.swap
-            x.swap = UNDEF            
-        end        
-    end  
-end
-export update_swaps
-
 function get_group(age)
     # input age: in weeks, output group from 1:15 
     r = findfirst(brak -> age in brak, agebraks) 
-    if r === nothing 
-        println("$age")
+    if r === nothing # this should never happen
         error("get_group threw an error")
     end
     return r 
@@ -257,6 +236,7 @@ end
 export get_group
 
 function apply_protection(x)
+    # applies a protection level to an individual based on their age/vaccine status
     p = 0.0
     age = x.age
     if x.health == SUSC 
@@ -279,48 +259,63 @@ export apply_protection
 
 ## transmission dynamics functions
 
-function age_and_vaccinate(x::Human)
-    # this function takes care of all the logic at the "end" of week for aging
+function update_swaps()
+    # update swaps
+    @inbounds for x in humans
+        if x.health == INF
+            x.swap = SUSC
+        end        
+        if x.swap == SUSC
+            x.health = SUSC
+            x.swap = UNDEF
+        end
+        if x.swap == INF
+            if x.infweek == 0
+                x.health = x.swap
+                x.swap = UNDEF
+            else 
+                x.infweek = 0
+            end
+        end     
+        if x.swap == REC
+            x.health = x.swap
+            x.swap = UNDEF            
+        end        
+    end  
+end
+export update_swaps
 
+function age_and_vaccinate(x::Human)
+    # this function ages the individual by one.
+    # also looks at whether the person will be vaccinated. 
+
+    ## data collection from this function
+    left_system = false  # true if individual leaves the system by nat death
+    left_infect = false  # true if infected individual leaves system by nat death
+    vaccinated  = false  # if person gets vaccinated
+    
     # store old information and update age
     oldgrp = x.group
-    newage = x.age + 1
-
-    ## have they left the system and were they infected when they left the system
-    left_system = false
-    left_infect = false
-    grp_changed = false
-    vaccinated  = false
-
-    if newage > x.ageofdeath
+    x.age = x.age + 1 
+    
+    if x.age < x.ageofdeath
+        x.group = get_group(x.age) 
+        if x.age >= x.vaccinetime # vaccinate the individual if it's their time
+            x.vaccinated = true
+            vaccinated = true
+        end               
+    else
         left_system = true
         x.health == INF && (left_infect = true)
         newborn(x)
-    else 
-        x.age = newage
-        x.group = get_group(newage)         
     end
-
-    # group has changed, let the main() function know so we can move this person in the vector
-    if x.group != oldgrp 
-        grp_changed = true
-    end
-
-     # vaccinate the individual if it's their time
-    if x.age == x.vaccinetime
-        x.vaccinated = true
-        vaccinated = true
-    end   
-
-    # apply their protection level based on how they've changed during the week
-    apply_protection(x)
-
+   
     ## do not change this order as tests depend on it
-    return grp_changed, left_system, left_infect, vaccinated
+    return left_system, left_infect, vaccinated
 end
 export age_and_vaccinate
 
-function contact_dynamic2(x, beta)
+function contact_dynamic2(x, beta, agm)
     ## right away check if x is infected, otherwise no use.
     #c = cts[x.idx, t]
     cnt_infected = 0
@@ -329,16 +324,14 @@ function contact_dynamic2(x, beta)
     if x.health == INF  ## note: flipping this around to SUSC didnt make a difference to results, only slowed it down
         ig = x.group                # get the infected person's group
         cnt_meet = rand(NB[ig])     # sample the number of contacts
+     
         # distribute cnt_meet to different groups based on contact matrix. 
         # these are not probabilities, but proportions. be careful. 
         # going from cnt_meet to the gpw array might remove a contact or two due to rounding. 
         gpw = Int.(round.(CM[ig]*cnt_meet)) 
         # let's stratify the human population in it's age groups. 
         # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments
-        agm = Vector{Vector{Int64}}(undef, 15)
-        for grp = 1:15
-            agm[grp] = findall(x -> x.health == SUSC && x.group == grp, humans)    
-        end        
+               
         # enumerate over the 15 groups and randomly select contacts from each group
         for (i, g) in enumerate(gpw)           
             if length(agm[i]) > 0 
@@ -356,7 +349,22 @@ function contact_dynamic2(x, beta)
                     end                     
                 end
             end
-        end        
+        end      
+        
+        # hp = findall(x -> x.health == SUSC, humans) 
+        # meet = rand(hp, cnt_meet)
+        # for j in meet             # loop one by one to check disease transmission
+        #     y = humans[j] 
+        #     if rand() < beta*(1 - y.protection)
+        #         y.swap = INF      # set the swap. 
+        #         if rand() < 0.5  
+        #             y.infweek = 0 
+        #         else 
+        #             y.infweek = 1
+        #         end
+        #         cnt_infected += 1
+        #     end                     
+        # end
     end
     return cnt_infected, cnt_meet
 end
