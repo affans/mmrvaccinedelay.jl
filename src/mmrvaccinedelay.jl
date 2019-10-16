@@ -88,10 +88,13 @@ function main(simnumber=1, vaxonoff=false, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime
     meet_ctr = zeros(Int64, P.sim_time)   ## how many contacts each week
     beta_ctr = zeros(Float64, P.sim_time)
     proc_ctr = zeros(Float64, P.sim_time) 
+    popu_ctr = zeros(Int64, P.sim_time)
+
     init_population()    
     insert_infected(P.initial_infected)
-    ## a vector of vectors
-    agm = Vector{Vector{Int64}}(undef, 15)
+    
+    agm = Vector{Vector{Int64}}(undef, 15) # array of array, holds stratified population
+
     ## start main time loop    
     for t = 1:P.sim_time         
         ## update agm
@@ -103,17 +106,21 @@ function main(simnumber=1, vaxonoff=false, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime
         if t == 400 
             init_vaccination(P.vaccination_coverage)
         end
+
+
         prev_ctr[t] = length(findall(x -> x.health == INF, humans))  
         reco_ctr[t] = length(findall(x -> x.health == REC, humans))
         susc_ctr[t] = length(findall(x -> x.health == SUSC, humans))
         proc_ctr[t] = length(findall(x -> x.health == SUSC && x.protection > 0, humans))
         beta_ctr[t] = betas[t]
+
         for j in 1:gridsize            
             x = humans[j]
             dtc, c = contact_dynamic2(x, betas[t], agm) 
             inft_ctr[t] += dtc
             meet_ctr[t] += c
-        end             
+        end 
+        update_swaps(t, popu_ctr)             
         for j in 1:gridsize
             x = humans[j]            
             ls, li, vc = age_and_vaccinate(x)  ## increase age of each agent. vaccinate if neccessary                        
@@ -123,9 +130,10 @@ function main(simnumber=1, vaxonoff=false, vc=0.8, b0=0.08, b1=0.9, ii=20, mtime
             left_inf[t] += li  
             vacc_ctr[t] += vc    
         end
-        update_swaps()                 
+        
+                        
     end   
-    dt = DataFrame(susc=susc_ctr, proc=proc_ctr, inft=inft_ctr, prev=prev_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr, beta=beta_ctr, meet=meet_ctr)
+    dt = DataFrame(susc=susc_ctr, proc=proc_ctr, inft=inft_ctr, prev=prev_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr, beta=beta_ctr, meet=meet_ctr, pop=popu_ctr)
     return dt
 end
 export main
@@ -259,15 +267,27 @@ export apply_protection
 
 ## transmission dynamics functions
 
-function update_swaps()
-    # update swaps
+function update_swaps(t, popctr)
+    # update swaps, t is current week of the simulation from 1:maxtime
+    cnt_rec = 0
     @inbounds for x in humans
         if x.health == INF
             x.swap = SUSC
+            ## if the person is recovering, the "recovered" population goes up (virtual population)
+            ## if the person who is recovering was supposed to die before the simulation ended, 
+            ## substract 1 from the virtual population. 
+            popctr[t] = popctr[t] + 1
+            alive_left = x.ageofdeath - x.age # how many weeks remaining till death 
+            if (t+alive_left <= P.sim_time)   # this recovered individual would've died before end of simulation
+                popctr[t+alive_left] = popctr[t+alive_left] - 1
+            end
         end        
         if x.swap == SUSC
+            # person is switching back to susceptible
+            # recalculate age of death. their age remains the same.
             x.health = SUSC
             x.swap = UNDEF
+            x.ageofdeath = calc_ageofdeath(x.age)
         end
         if x.swap == INF
             if x.infweek == 0
@@ -282,6 +302,7 @@ function update_swaps()
             x.swap = UNDEF            
         end        
     end  
+    return cnt_rec
 end
 export update_swaps
 

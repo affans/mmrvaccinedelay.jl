@@ -24,6 +24,7 @@ function single(voo, vc, beta0, beta1, ii, mtime)
     dd = d |> @groupby(_.year) |>
         @map({year=key(_), 
               cnt=length(_),
+              pop=mean(_.pop),
               susc=mean(_.susc),
               proc=mean(_.proc),
               inft=mean(_.inft), 
