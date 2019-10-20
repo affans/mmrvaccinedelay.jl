@@ -36,7 +36,6 @@ mutable struct Human ## mutable structs are stored on the heap
     Human() = new()
 end
 
-
 ## MAIN SYSTEM PARAMETER
 @with_kw mutable struct ModelParameters @deftype Float64
     # general parameters
@@ -44,26 +43,27 @@ end
     vaccine_onoff::Bool = false
     vaccination_coverage = 0.8
     vaccination_scenario::String = "fixed"
-    beta0 = 0.08
+    beta0 = 0.016  ## first results: 0.016
     beta1 = 0.9
     initial_infected::Int64 = 20
 end
 
 # global system settings 
-const gridsize = 10000
+const gridsize = 5000
 const agedist =  Categorical(@SVector [0.053, 0.055, 0.052, 0.056, 0.067, 0.07, 0.07, 0.068, 0.064, 0.066, 0.072, 0.073, 0.064, 0.054, 0.116])
 const agebraks_old = @SVector [0:4, 5:9, 10:14, 15:19, 20:24, 25:29, 30:34, 35:39, 40:44, 45:49, 50:54, 55:59, 60:64, 65:69, 70:85]
 const agebraks = @SVector [0:200, 201:450, 451:700, 701:950, 951:1200, 1201:1450, 1451:1700, 1701:1950, 1951:2200, 2201:2450, 2451:2700, 2701:2950, 2951:3200, 3201:3450, 3451:4250]
 const humans = Array{Human}(undef, gridsize)
-const delay_distribution = Gamma(1.7, 22)
-
+const delay_distribution = Gamma(1.7, 14)
+# scale=14,  avg delay: 6 months
+# scale=29.4 avg delay: 1 year
 const P = ModelParameters()
 
 export HEALTH, humans, agedist, agebraks, P
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
-function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.08, b1=0.9, ii=20, mtime=2500 )  # P is model parameters
+function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, mtime=2500 )  # P is model parameters
     # main entry point of the simulation
     Random.seed!(simnumber)    
 
@@ -297,7 +297,6 @@ end
 export apply_protection
 
 ## transmission dynamics functions
-
 function update_swaps(t, popctr)
     # update swaps, t is current week of the simulation from 1:maxtime
     cnt_rec = 0
@@ -320,6 +319,9 @@ function update_swaps(t, popctr)
             x.swap = UNDEF
             x.ageofdeath = calc_ageofdeath(x.age)
             x.infweek = 0
+            # if rand() < 0.10
+            #     newborn(x)
+            # end
         end
         if x.swap == INF
             if x.infweek == 0
@@ -376,15 +378,13 @@ function contact_dynamic2(x, beta, agm)
     cnt_meet_susc = 0
     if x.health == INF  ## note: flipping this around to SUSC didnt make a difference to results, only slowed it down
         ig = x.group                # get the infected person's group
-        cnt_meet = sum(rand(NB[ig], 7))     # sample the number of contacts
-     
+        cnt_meet = sum(rand(NB[ig], 7))     # sample the number of contacts     
         # distribute cnt_meet to different groups based on contact matrix. 
         # these are not probabilities, but proportions. be careful. 
         # going from cnt_meet to the gpw array might remove a contact or two due to rounding. 
         gpw = Int.(round.(CM[ig]*cnt_meet)) 
         # let's stratify the human population in it's age groups. 
-        # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments
-               
+        # this could be optimized by putting it outside the contact_dynamic2 function and passed in as arguments               
         # enumerate over the 15 groups and randomly select contacts from each group
         for (i, g) in enumerate(gpw)           
             if length(agm[i]) > 0 
@@ -402,8 +402,7 @@ function contact_dynamic2(x, beta, agm)
                     end                     
                 end
             end
-        end      
-        
+        end              
         # hp = findall(x -> x.health == SUSC, humans) 
         # meet = rand(hp, cnt_meet)
         # for j in meet             # loop one by one to check disease transmission
