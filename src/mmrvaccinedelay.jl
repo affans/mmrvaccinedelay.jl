@@ -1,17 +1,5 @@
 module mmrvaccinedelay
 
-# removed herd immunity
-# added code for SWAP REC -> SUSC
-# optimized AGM
-# changed init_ functions to have argument parameters
-# optimized the age function and separted functions
-
-# 4 major components
-# weekly unit step, for vaccination delay purposes. 
-# contact patterns. 
-# seasonal beta, use some sort of function with week input
-# age groups, for vaccination and calibration purposes
-
 using Parameters      ## with julia 1.1 this is now built in.
 using ProgressMeter   ## can now handle parallel with progress_pmap
 using DataFrames
@@ -43,8 +31,9 @@ end
     vaccine_onoff::Bool = false
     vaccination_coverage = 0.8
     vaccination_scenario::String = "fixed"
+    herdimmunity_coverage = 0.0
     beta0 = 0.016  ## first results: 0.016
-    beta1 = 0.9
+    beta1 = 0.9    ## used for the seasonality amplitude. 
     initial_infected::Int64 = 20
 end
 
@@ -63,7 +52,7 @@ export HEALTH, humans, agedist, agebraks, P
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
-function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, obsize=1, obtime=500, mtime=2500 )  # P is model parameters
+function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, obsize=1, obtime=500, hicov=0.0, mtime=2500 )  # P is model parameters
     # main entry point of the simulation
     Random.seed!(simnumber)
 
@@ -75,6 +64,7 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, 
     P.beta1 = b1
     P.initial_infected = ii
     P.sim_time = mtime   
+    P.herdimmunity_coverage = hicov
     
     ## setup seasonal betas, if P.beta1 = 0 then we have fixed beta
     betas = [P.beta0*(1+P.beta1*sin(2*pi*t/50)) for t = 1:P.sim_time]    
@@ -95,6 +85,7 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, 
     avg5_ctr = zeros(Int64, P.sim_time)
 
     init_population()    
+    init_herdimmunity(P.herdimmunity_coverage)
     insert_infected(P.initial_infected)
     
     agm = Vector{Vector{Int64}}(undef, 15) # array of array, holds stratified population
@@ -115,7 +106,7 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, 
         if t == obtime 
             insert_infected(obsize)
         end
-        
+
         prev_ctr[t] = length(findall(x -> x.health == INF, humans))  
         avg4_ctr[t] = length(findall(x -> x.health == INF && x.age <= 200, humans)) 
         avg5_ctr[t] = length(findall(x -> x.health == INF && x.age > 200, humans)) 
@@ -199,6 +190,20 @@ function init_population()
 end
 export init_population
 
+function init_herdimmunity(cov)
+    cov > 1 && error("herd immunity coverage must be between 0 and 1")
+    hi_eligble = findall(x -> x.age >= 200 && x.health == SUSC, humans)
+    if length(hi_eligble) > 0 
+        num = Int(round(cov * length(hi_eligble)))
+        h = sample(hi_eligble, num; replace = false)
+        @inbounds for i in h 
+            humans[i].health = REC
+            apply_protection(humans[i])
+        end
+    end  
+end
+export init_herdimmunity
+
 function vaccinate(x::Human)
     # we don't set x.vaccinated = true here. age function will take care of it.
     if P.vaccination_scenario == "fixed"
@@ -225,7 +230,6 @@ function init_vaccination(cov)
     end    
 end
 export init_vaccination
-
 
 ## human functions and helper functions
 function apply_agedistribution(x::Human)
