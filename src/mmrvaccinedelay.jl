@@ -115,16 +115,20 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, 
         beta_ctr[t] = betas[t]
         proc_ctr[t] = proc_ctr_update()
         
+        ## loop for contact tranmission dynamics
         for j in 1:gridsize            
             x = humans[j]
             d, c = contact_dynamic2(x, betas[t], agm) 
             inft_ctr[t] += d
             meet_ctr[t] += c
         end 
-        update_swaps(t, popu_ctr)             
+        update_swaps(t, popu_ctr)  
+        
+        ## loop for system update 
         for j in 1:gridsize
             x = humans[j]            
-            ls, li, vc = age_and_vaccinate(x)  ## increase age of each agent. vaccinate if neccessary                        
+            ls, li = age_and_death(x)  ## increase age of each agent. set_vaccine_time if neccessary                        
+            vc = vaccinate(x)
             apply_protection(x) # apply their protection level on their new age/vaccination
 
             left_ctr[t] += ls
@@ -176,7 +180,7 @@ function newborn(x::Human)
     ## give vaccination
     if P.vaccine_onoff 
         if rand() < P.vaccination_coverage           
-            vaccinate(x)
+            set_vaccine_time(x)
         end
     end     
     apply_protection(x) ## should apply maternal immunity
@@ -207,16 +211,23 @@ function init_herdimmunity(cov)
 end
 export init_herdimmunity
 
-function vaccinate(x::Human)
+function set_vaccine_time(x::Human)
     # we don't set x.vaccinated = true here. age function will take care of it.
     if P.vaccination_scenario == "fixed"
         x.vaccinetime = 50
     elseif P.vaccination_scenario == "delay"
         x.vaccinetime = 50 + Int(round(rand(delay_distribution)))
     end    
-    if x.age > x.vaccinetime 
+end
+export set_vaccine_time
+
+function vaccinate(x::Human)
+    ## basic helper function. 
+    if x.age == x.vaccinetime 
         x.vaccinated = true
+        return true
     end
+    return false
 end
 export vaccinate
 
@@ -226,8 +237,12 @@ function init_vaccination(cov)
     if P.vaccine_onoff
         kids = findall(x -> x.age >= 50 && x.age < 200, humans)
         @inbounds for i in kids
-            if rand() < cov        
-                vaccinate(humans[i])
+            if rand() < cov     
+                x = humans[i]
+                set_vaccine_time(x)
+                if x.age >= x.vaccinetime 
+                    x.vaccinated = true
+                end
             end
         end
     end    
@@ -302,6 +317,7 @@ function apply_protection(x)
         p = 1.0
     end
     x.protection = p
+    return p
 end
 export apply_protection
 
@@ -349,25 +365,20 @@ function update_swaps(t, popctr)
 end
 export update_swaps
 
-function age_and_vaccinate(x::Human)
+function age_and_death(x::Human)
     # this function ages the individual by one.
     # also looks at whether the person will be vaccinated. 
 
     ## data collection from this function
     left_system = false  # true if individual leaves the system by nat death
     left_infect = false  # true if infected individual leaves system by nat death
-    vaccinated  = false  # if person gets vaccinated
-    
+   
     # store old information and update age
     oldgrp = x.group
     x.age = x.age + 1 
     
     if x.age < x.ageofdeath
-        x.group = get_group(x.age) 
-        if x.age == x.vaccinetime # vaccinate the individual if it's their time
-            x.vaccinated = true
-            vaccinated = true
-        end               
+        x.group = get_group(x.age)              
     else
         left_system = true
         x.health == INF && (left_infect = true)
@@ -375,9 +386,9 @@ function age_and_vaccinate(x::Human)
     end
    
     ## do not change this order as tests depend on it
-    return left_system, left_infect, vaccinated
+    return left_system, left_infect
 end
-export age_and_vaccinate
+export age_and_death
 
 function contact_dynamic2(x, beta, agm)
     ## right away check if x is infected, otherwise no use.
