@@ -7,10 +7,10 @@
 
 using Parameters
 
-function single(vc, vs, vt, beta0, beta1, ii, obsize, mtime)
+function single(vc, vs, vt, beta0, beta1, ii, obsize, obtime, hicov, mtime)
     # this function runs a set of simulations.
     cd = pmap(1:500) do x
-        main(x, vc, vs, vt, beta0, beta1, ii, obsize, mtime)
+        main(x, vc, vs, vt, beta0, beta1, ii, obsize, obtime, hicov, mtime)
     end
     
     for i = 1:500

@@ -40,7 +40,6 @@ end
 # global system settings 
 const gridsize = 5000
 const agedist =  Categorical(@SVector [0.053, 0.055, 0.052, 0.056, 0.067, 0.07, 0.07, 0.068, 0.064, 0.066, 0.072, 0.073, 0.064, 0.054, 0.116])
-const agebraks_old = @SVector [0:4, 5:9, 10:14, 15:19, 20:24, 25:29, 30:34, 35:39, 40:44, 45:49, 50:54, 55:59, 60:64, 65:69, 70:85]
 const agebraks = @SVector [0:200, 201:450, 451:700, 701:950, 951:1200, 1201:1450, 1451:1700, 1701:1950, 1951:2200, 2201:2450, 2451:2700, 2701:2950, 2951:3200, 3201:3450, 3451:4250]
 const humans = Array{Human}(undef, gridsize)
 const delay_distribution = Gamma(1.7, 14)
@@ -92,17 +91,18 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, 
 
     ## start main time loop    
     for t = 1:P.sim_time         
-        ## update agm
+        ## update agm at every time step
         for grp = 1:15
             agm[grp] = findall(x -> x.health == SUSC && x.group == grp, humans)    
         end 
 
-        ## start vaccine if t == 400
+        ## start vaccineat at specified time with a specified coverage
         if t == vt 
             P.vaccine_onoff = true
             init_vaccination(P.vaccination_coverage)
         end
 
+        ## start a measles outbreak at a specified time with some number
         if t == obtime 
             insert_infected(obsize)
         end
@@ -117,8 +117,8 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, 
         
         for j in 1:gridsize            
             x = humans[j]
-            dtc, c = contact_dynamic2(x, betas[t], agm) 
-            inft_ctr[t] += dtc
+            d, c = contact_dynamic2(x, betas[t], agm) 
+            inft_ctr[t] += d
             meet_ctr[t] += c
         end 
         update_swaps(t, popu_ctr)             
@@ -138,6 +138,9 @@ end
 export main
 
 function proc_ctr_update()
+    # this function calculates the total "amount of protection" 
+    # in the population at any given time.
+    # used in the main function as a data collection tool 
     protected_humans = findall(x -> x.health == SUSC && x.protection > 0, humans)
     totalprotection = 0.0
     for i in protected_humans
