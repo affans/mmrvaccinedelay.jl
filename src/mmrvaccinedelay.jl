@@ -63,9 +63,9 @@ export HEALTH, humans, agedist, agebraks, P
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
-function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, mtime=2500 )  # P is model parameters
+function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, obsize=1, obtime=500, mtime=2500 )  # P is model parameters
     # main entry point of the simulation
-    Random.seed!(simnumber)    
+    Random.seed!(simnumber)
 
     # set the global parameters of the model
     P.vaccination_scenario = vs
@@ -112,6 +112,10 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, 
             init_vaccination(P.vaccination_coverage)
         end
 
+        if t == obtime 
+            insert_infected(obsize)
+        end
+        
         prev_ctr[t] = length(findall(x -> x.health == INF, humans))  
         avg4_ctr[t] = length(findall(x -> x.health == INF && x.age <= 200, humans)) 
         avg5_ctr[t] = length(findall(x -> x.health == INF && x.age > 200, humans)) 
@@ -235,10 +239,12 @@ export apply_agedistribution
 function insert_infected(num) 
     ## inserts a number of infected people in the population randomly
     l = findall(x -> x.health == SUSC, humans)
-    h = sample(l, num; replace = false)
-    @inbounds for i in h 
-        humans[i].health = INF
-    end
+    if length(l) > 0 
+        h = sample(l, num; replace = false)
+        @inbounds for i in h 
+            humans[i].health = INF
+        end
+    end    
 end
 export insert_infected
 
@@ -276,17 +282,13 @@ function apply_protection(x)
     age = x.age
     if x.health == SUSC 
         if age < 26
-            p = 1.0
+            p = 0.0
         end    
         if age >= 26 && age < 50
-            p = 0.5
+            p = 0.0
         end
         if x.vaccinated
-            if x.age < 1000
-                p = 0.95
-            else 
-                p = 0.50
-            end
+            p = 0.95
         end
     end    
     if x.health == REC
@@ -302,7 +304,7 @@ function update_swaps(t, popctr)
     cnt_rec = 0
     @inbounds for x in humans
         if x.health == INF
-            x.swap = SUSC
+            x.swap = REC
             ## if the person is recovering, the "recovered" population goes up (virtual population)
             ## if the person who is recovering was supposed to die before the simulation ended, 
             ## substract 1 from the virtual population. 
