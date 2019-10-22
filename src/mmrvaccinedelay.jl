@@ -122,7 +122,7 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, 
             inft_ctr[t] += d
             meet_ctr[t] += c
         end 
-        update_swaps(t, popu_ctr)  
+        update_swaps()  # move inf -> rec, move susc -> inf if infected.
         
         ## loop for system update 
         for j in 1:gridsize
@@ -322,7 +322,7 @@ end
 export apply_protection
 
 ## transmission dynamics functions
-function update_swaps(t, popctr)
+function update_swaps()
     # update swaps, t is current week of the simulation from 1:maxtime
     cnt_rec = 0
     @inbounds for x in humans
@@ -331,11 +331,11 @@ function update_swaps(t, popctr)
             ## if the person is recovering, the "recovered" population goes up (virtual population)
             ## if the person who is recovering was supposed to die before the simulation ended, 
             ## substract 1 from the virtual population. 
-            popctr[t] = popctr[t] + 1
-            alive_left = x.ageofdeath - x.age # how many weeks remaining till death 
-            if (t+alive_left <= P.sim_time)   # this recovered individual would've died before end of simulation
-                popctr[t+alive_left] = popctr[t+alive_left] - 1
-            end
+            # popctr[t] = popctr[t] + 1
+            # alive_left = x.ageofdeath - x.age # how many weeks remaining till death 
+            # if (t+alive_left <= P.sim_time)   # this recovered individual would've died before end of simulation
+            #     popctr[t+alive_left] = popctr[t+alive_left] - 1
+            # end
         end        
         if x.swap == SUSC
             # person is switching back to susceptible
@@ -344,9 +344,6 @@ function update_swaps(t, popctr)
             x.swap = UNDEF
             x.ageofdeath = calc_ageofdeath(x.age)
             x.infweek = 0
-            # if rand() < 0.10
-            #     newborn(x)
-            # end
         end
         if x.swap == INF
             if x.infweek == 0
