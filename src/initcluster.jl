@@ -14,6 +14,8 @@ using Query
 using Statistics
 using UnicodePlots
 using Dates
+using ProgressMeter
+
 
 using mmrvaccinedelay
 const mmr=mmrvaccinedelay
