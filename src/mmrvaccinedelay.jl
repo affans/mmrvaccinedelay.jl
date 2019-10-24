@@ -38,10 +38,9 @@ end
 end
 
 # global system settings 
-const gridsize = 5000
 const agedist =  Categorical(@SVector [0.053, 0.055, 0.052, 0.056, 0.067, 0.07, 0.07, 0.068, 0.064, 0.066, 0.072, 0.073, 0.064, 0.054, 0.116])
 const agebraks = @SVector [0:200, 201:450, 451:700, 701:950, 951:1200, 1201:1450, 1451:1700, 1701:1950, 1951:2200, 2201:2450, 2451:2700, 2701:2950, 2951:3200, 3201:3450, 3451:4250]
-const humans = Array{Human}(undef, gridsize)
+const humans = Array{Human}(undef, 1000)
 const delay_distribution = Gamma(1.7, 14)
 # scale=14,  avg delay: 6 months
 # scale=29.4 avg delay: 1 year
@@ -51,7 +50,7 @@ export HEALTH, humans, agedist, agebraks, P
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
-function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, obsize=1, obtime=500, hicov=0.0, mtime=2500 )  # P is model parameters
+function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, obsize=1, obtime=500, hicov=0.0, mtime=2500 )  # P is model parameters
     # main entry point of the simulation
     Random.seed!(simnumber)
 
@@ -64,6 +63,9 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, 
     P.initial_infected = ii
     P.sim_time = mtime   
     P.herdimmunity_coverage = hicov
+
+    # resize the main humans array
+    resize!(humans, hsize)
     
     ## setup seasonal betas, if P.beta1 = 0 then we have fixed beta
     betas = [P.beta0*(1+P.beta1*sin(2*pi*t/50)) for t = 1:P.sim_time]    
@@ -116,7 +118,7 @@ function main(simnumber=1, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, 
         susc_ctr[t] = length(findall(x -> x.health == SUSC, humans))
         proc_ctr[t] = proc_ctr_update()
         
-        
+        gridsize = length(humans) 
         ## loop for contact tranmission dynamics
         for j in 1:gridsize            
             x = humans[j]
@@ -189,8 +191,8 @@ function newborn(x::Human)
 end
 export newborn
 
-function init_population()    
-    @inbounds for i = 1:gridsize
+function init_population()   
+    @inbounds for i = 1:length(humans) 
         humans[i] = Human()              ## create an empty human
         reset_human(humans[i], i)        ## reset the human
         apply_agedistribution(humans[i])

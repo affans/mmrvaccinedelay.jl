@@ -8,11 +8,11 @@
 using Parameters
 using Dates
 
-function single(vc, vs, vt, beta0, beta1, ii, obsize, obtime, hicov, mtime)
+function single(hsize, vc, vs, vt, beta0, beta1, ii, obsize, obtime, hicov, mtime)
     # this function runs 500 simulations with the given parameters.
     # returns a dataframe with averages of 500 simulations
     cd = pmap(1:500) do x
-        main(x, vc, vs, vt, beta0, beta1, ii, obsize, obtime, hicov, mtime)
+        main(x, hsize, vc, vs, vt, beta0, beta1, ii, obsize, obtime, hicov, mtime)
     end
     
     for i = 1:500
@@ -58,7 +58,7 @@ function scenarios()
     dn = "/data/measles/$(Dates.format(Dates.now(), dateformat"mmdd_HHMM"))"
     mkpath("$dn")
     println("created directory: $dn")
-    
+       
     ## calculate R0s 
     println("calculating R0s...")
     rzeros= Dict{Float64, Float64}()
@@ -72,8 +72,8 @@ function scenarios()
     total = length(hi)*length(vc)*length(beta)
     p = Progress(total, 0.1, "running scenario")   # minimum update interval: 1 second
     for h in hi, v in vc, b in beta 
-        # rdf = single(0.9, "fixed", 5, 0.21, 0.0, 0, 1, 500, hi, 5)
-        # rdd = single(0.9, "delay", 5, 0.21, 0.0, 0, 1, 500, hi, 5)
+        # rdf = single(10000, 0.9, "fixed", 5, 0.21, 0.0, 0, 1, 500, hi, 5)
+        # rdd = single(10000, 0.9, "delay", 5, 0.21, 0.0, 0, 1, 500, hi, 5)
         
         # insertcols!(rdf, 3, :R0 => rzeros[b])    
         # insertcols!(rdd, 3, :R0 => rzeros[b])    
