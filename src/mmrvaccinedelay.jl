@@ -50,7 +50,7 @@ export HEALTH, humans, agedist, agebraks, P
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
-function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=0.9, ii=20, obsize=1, obtime=500, hicov=0.0, mtime=2500 )  # P is model parameters
+function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", vt=1, b0=0.016, b1=0.9, obsize=1, obtime=[1], hicov=0.0, mtime=2500 )  # P is model parameters
     # main entry point of the simulation
     Random.seed!(simnumber)
 
@@ -60,7 +60,6 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=
     P.vaccine_onoff  = false
     P.beta0 = b0
     P.beta1 = b1
-    P.initial_infected = ii
     P.sim_time = mtime   
     P.herdimmunity_coverage = hicov
 
@@ -88,7 +87,6 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=
 
     init_population()    
     init_herdimmunity(P.herdimmunity_coverage)
-    insert_infected(P.initial_infected)
     
     agm = Vector{Vector{Int64}}(undef, 15) # array of array, holds stratified population
 
@@ -106,7 +104,7 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", vt=400, b0=0.016, b1=
         end
 
         ## start a measles outbreak at a specified time with some number
-        if t == obtime 
+        if t in obtime 
             insert_infected(obsize)
         end
 
