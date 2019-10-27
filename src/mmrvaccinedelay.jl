@@ -94,7 +94,7 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", vt=1, b0=0.016, b1=0.
     for t = 1:P.sim_time         
         ## update agm at every time step
         for grp = 1:15
-            agm[grp] = findall(x -> x.health == SUSC && x.group == grp, humans)    
+            agm[grp] = findall(x -> x.group == grp, humans)    
         end 
 
         ## start vaccineat at specified time with a specified coverage
@@ -409,15 +409,17 @@ function contact_dynamic2(x, beta, agm)
                 meet = rand(agm[i], g)    # sample 'g' number of people from this group  
                 for j in meet             # loop one by one to check disease transmission
                     y = humans[j] 
-                    if rand() < beta*(1 - y.protection)
-                        y.swap = INF      # set the swap. 
-                        if rand() < 0.5  
-                            y.infweek = 0 
-                        else 
-                            y.infweek = 1
+                    if y.health == SUSC 
+                        if rand() < beta*(1 - y.protection)
+                            y.swap = INF      # set the swap. 
+                            if rand() < 0.5  
+                                y.infweek = 0 
+                            else 
+                                y.infweek = 1
+                            end
+                            cnt_infected += 1
                         end
-                        cnt_infected += 1
-                    end                     
+                    end           
                 end
             end
         end              
