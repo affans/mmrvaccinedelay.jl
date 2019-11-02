@@ -5,11 +5,11 @@
 using Parameters
 using Dates
 
-function single(hsize, vc, vs, vt, beta0, beta1, obsize, obtime, hicov, mtime)
+function single(hsize, vc, vs, sh, sc, vt, beta0, beta1, obsize, obtime, hicov, mtime)
     # this function runs 500 simulations with the given parameters.
     # returns a dataframe with averages of 500 simulations
     cd = pmap(1:500) do x
-        main(x, hsize, vc, vs, vt, beta0, beta1, obsize, obtime, hicov, mtime)
+        main(x, hsize, vc, vs, sh, sc, vt, beta0, beta1, obsize, obtime, hicov, mtime)
     end
     
     for i = 1:500
@@ -60,7 +60,9 @@ function scenarios()
     println("calculating R0s...")
     rzeros= Dict{Float64, Float64}()
     for b in beta
-        rd = single(100000, 1.0, "fixed", 0, b, 0.0, 1, [1], 0, 2)        
+        rd = single(100000, 1.0, "fixed", 1, 1, 0, b, 0.05, 1, [1], 0, 2)   
+        ## make sure seasonality is on here if using 
+        ## in the main simulations to get true beta/R0 value      
         push!(rzeros, b => rd.inft[1])
     end
     CSV.write("$dn/rzeros.dat", rzeros)
@@ -69,12 +71,14 @@ function scenarios()
     total = length(hi)*length(vc)*length(beta)
     p = Progress(total, 0.1, "running scenario")   # minimum update interval: 1 second
     for h in hi, v in vc, b in beta 
-        rdf = single(100000, v, "fixed", 1, b, 0.05, 1, [250, 1250], h, 1500)
-        rdd = single(100000, v, "delay", 1, b, 0.05, 1, [250, 1250], h, 1500)
-        
-        ff, fd = get_save_name(h, v, b)
+        rdf =  single(100000, v, "fixed", 1, 1, 1, b, 0.05, 1, [250, 1250], h, 1500)
+        rdds = single(100000, v, "delay", 1.7, 14, 1, b, 0.05, 1, [250, 1250], h, 1500)
+        rddl = single(100000, v, "delay", 1.7, 29.4, 1, b, 0.05, 1, [250, 1250], h, 1500)
+
+        ff, fds, fdl = get_save_name(h, v, b)
         CSV.write("$dn/$ff", rdf)
-        CSV.write("$dn/$fd", rdd)
+        CSV.write("$dn/$fds", rdds)
+        CSV.write("$dn/$fdl", rddl)
         next!(p; showvalues = [(:hi,h), (:vc,v), (:beta, b)])
     end
 end
@@ -85,8 +89,9 @@ function get_save_name(h,v,b)
     bb = string(Int(round(b*100)))
     
     fixedname = "hi$(hh)_vc$(vv)_beta$(bb)_fixed.dat"
-    delayname = "hi$(hh)_vc$(vv)_beta$(bb)_delay.dat"
-    return fixedname, delayname    
+    delayname = "hi$(hh)_vc$(vv)_beta$(bb)_delays.dat"
+    delaynamelong = "hi$(hh)_vc$(vv)_beta$(bb)_delayl.dat"
+    return fixedname, delayname, delaynamelong  
 end
 
 
