@@ -41,10 +41,11 @@ end
 # global system settings 
 # US age distribution for 2018. Downloaded from https://www.census.gov/data/tables/time-series/demo/popest/2010s-national-detail.html 
 # the file is on the cluster in /data/datasets/
-const agedist =  Categorical(@SVector [0.053, 0.055, 0.052, 0.056, 0.067, 0.07, 0.07, 0.068, 0.064, 0.066, 0.072, 0.073, 0.064, 0.054, 0.116])
-const agebraks = @SVector [0:200, 201:450, 451:700, 701:950, 951:1200, 1201:1450, 1451:1700, 1701:1950, 1951:2200, 2201:2450, 2451:2700, 2701:2950, 2951:3200, 3201:3450, 3451:4250]
+const agedist =  Categorical(@SVector [0.04826002, 0.061624508, 0.063477388, 0.06418943, 0.066031645, 0.071781172, 0.068554794, 0.066528651, 0.061066338, 0.062600017, 0.06295431, 0.06740441, 0.063575735, 0.054156946, 0.117794637])
+const agebraks = @SVector [0:199, 200:449, 450:699, 700:949, 950:1199, 1200:1449, 1450:1699, 1700:1949, 1950:2199, 2200:2449, 2450:2699, 2700:2949, 2950:3199, 3200:3449, 3450:5000]
 const humans = Array{Human}(undef, 1000)
 const P = ModelParameters()
+## code for age bracket generate @SVector [(i):(i+250-1) for i = 200:250:4950]
 
 export HEALTH, humans, agedist, agebraks, P
 
@@ -281,14 +282,14 @@ function calc_ageofdeath(age)
     ## given a age, what is the chance they will die the year after 
     ## or any of the following years. 
     ## based on USA life tables
-    rt = 85 ## set a default age of death 
+    rt = 100 # default age of death
     ageinyears = Int(floor(age/50))    
-    for age = ageinyears:84
-        getprobdeath = death_dist[age + 1]
+    for age = ageinyears:100  ## 100% fatal at age 100
+        getprobdeath = death_dist[age + 1]  ## since arrays are 1 based
         #println("prob: $getprobdeath")
         if rand() < getprobdeath
             #println(age)
-            rt = age + 1
+            rt = age
             break
         end
     end
@@ -549,7 +550,7 @@ end
 const NB = negative_binomials()
 export negative_binomials, NB
 
-## see excel file in measles folder for death distribution
+## see excel file in measles folder for death distribution, this is per year
 const death_dist = [0.006799, 0.000483, 0.000297, 0.000224, 0.000188, 0.000171, 0.000161, 0.000151, 0.000136, 
         0.000119, 0.000106, 0.000112, 0.000149, 0.000227, 0.000337, 0.00046, 0.000579, 0.000684, 
         0.000763, 0.000819, 0.000873, 0.000926, 0.00096, 0.000972, 0.000969, 0.00096, 0.000954, 
