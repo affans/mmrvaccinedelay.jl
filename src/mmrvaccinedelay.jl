@@ -85,10 +85,10 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 
     meet_ctr = zeros(Int64, P.sim_time)   ## how many contacts each week
     beta_ctr = zeros(Float64, P.sim_time)
     proc_ctr = zeros(Float64, P.sim_time) 
-    popu_ctr = zeros(Int64, P.sim_time)
     avg4_ctr = zeros(Int64, P.sim_time)
     avg5_ctr = zeros(Int64, P.sim_time)
-    vinf_ctr = zeros(Int64, P.sim_time)   ## how many infected and vaccinated
+    vinf_ctr = zeros(Int64, P.sim_time)   ## how many infected out of the vaccinated
+    avg6_ctr = zeros(Float64, P.sim_time)   ## average age of infection at time t. 
 
     init_population()    
     init_herdimmunity(P.herdimmunity_coverage)
@@ -120,7 +120,8 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 
         reco_ctr[t] = length(findall(x -> x.health == REC, humans))
         susc_ctr[t] = length(findall(x -> x.health == SUSC, humans))
         proc_ctr[t] = proc_ctr_update()
-        
+        avg6_ctr[t] = avg_age_infection()
+
         gridsize = length(humans) 
         ## loop for contact tranmission dynamics
         for j in 1:gridsize            
@@ -143,7 +144,7 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 
             vacc_ctr[t] += vc    
         end        
     end   
-    dt = DataFrame(susc=susc_ctr, proc=proc_ctr, inft=inft_ctr, prev=prev_ctr, avg4=avg4_ctr, avg5=avg5_ctr, vinf = vinf_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr, beta=betas, meet=meet_ctr, pop=popu_ctr)
+    dt = DataFrame(susc=susc_ctr, proc=proc_ctr, inft=inft_ctr, prev=prev_ctr, avg4=avg4_ctr, avg5=avg5_ctr, vinf = vinf_ctr, reco=reco_ctr, leftsys=left_ctr, leftinf=left_inf, vacc=vacc_ctr, beta=betas, meet=meet_ctr, avg6=avg6_ctr)
     return dt
 end
 export main
@@ -160,6 +161,17 @@ function proc_ctr_update()
     return totalprotection
 end
 export proc_ctr_update
+
+function avg_age_infection()
+    inf_humans = findall(x -> x.health == INF, humans)
+    ages = [humans[i].age for i in inf_humans]
+    if length(ages) > 0 
+        return mean(ages)
+    else 
+        return 0 
+    end
+end
+export avg_age_infection
 
 ## initialization functions 
 function reset_human(x::Human, idx = 0)
@@ -332,7 +344,6 @@ export apply_protection
 ## transmission dynamics functions
 function update_swaps()
     # update swaps, t is current week of the simulation from 1:maxtime
-    cnt_rec = 0
     @inbounds for x in humans
         if x.health == INF
             x.swap = REC
@@ -366,7 +377,6 @@ function update_swaps()
             x.swap = UNDEF            
         end        
     end  
-    return cnt_rec
 end
 export update_swaps
 

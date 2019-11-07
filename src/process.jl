@@ -23,7 +23,7 @@ function single(hsize, vc, vs, sh, sc, vt, beta0, beta1, obsize, obtime, hicov, 
     dd = d |> @groupby(_.year) |>
         @map({year=key(_), 
               cnt=length(_),
-              pop=mean(_.pop),
+              avg6=mean(_.avg6),
               susc=mean(_.susc),
               proc=mean(_.proc),
               avg4=mean(_.avg4),
