@@ -44,6 +44,7 @@ end
 const agedist =  Categorical(@SVector [0.04826002, 0.061624508, 0.063477388, 0.06418943, 0.066031645, 0.071781172, 0.068554794, 0.066528651, 0.061066338, 0.062600017, 0.06295431, 0.06740441, 0.063575735, 0.054156946, 0.117794637])
 const agebraks = @SVector [0:199, 200:449, 450:699, 700:949, 950:1199, 1200:1449, 1450:1699, 1700:1949, 1950:2199, 2200:2449, 2450:2699, 2700:2949, 2950:3199, 3200:3449, 3450:5000]
 const humans = Array{Human}(undef, 1000)
+const fixed_distribution = Gamma(1.7, 1.25)
 const P = ModelParameters()
 ## code for age bracket generate @SVector [(i):(i+250-1) for i = 200:250:4950]
 
@@ -234,9 +235,9 @@ function set_vaccine_time(x::Human)
     # we don't set x.vaccinated = true here. age function will take care of it.
     dd = P.delay_distribution
     if P.vaccination_scenario == "fixed"
-        x.vaccinetime = 50
+        x.vaccinetime = 50 + Int(round(rand(fixed_distribution)))
     elseif P.vaccination_scenario == "delay"
-        x.vaccinetime = 50 + Int(round(rand(dd)))
+        x.vaccinetime = 62 + Int(round(rand(dd)))
     end    
 end
 export set_vaccine_time
@@ -330,7 +331,11 @@ function apply_protection(x)
             p = 0.0
         end
         if x.vaccinated
-            p = 0.95
+            if P.vaccination_scenario == "fixed"
+                p = 0.93
+            else 
+                p = 0.97
+            end 
         end
     end    
     if x.health == REC
