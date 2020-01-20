@@ -64,10 +64,11 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 
     P.beta1 = b1
     P.sim_time = mtime   
     P.herdimmunity_coverage = hicov
-    P.delay_distribution = Gamma(shape, scale)
+    P.delay_distribution = Gamma(shape, scale)  
     # shape 1.7
     # scale=14,  avg delay: 6 months
     # scale=29.4 avg delay: 1 year
+    # fixed ('on-time') distribution is defined as a constant 
 
     # resize the main humans array
     resize!(humans, hsize)
