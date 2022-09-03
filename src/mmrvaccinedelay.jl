@@ -6,11 +6,12 @@ using DataFrames
 using Distributions
 using StatsBase
 using StaticArrays
+using Distributed  # remove if not needed 
 using Random
 
 @enum HEALTH UNDEF = 0 SUSC = 1 INF = 2 REC = 3
 
-mutable struct Human ## mutable structs are stored on the heap 
+mutable struct Human 
     idx::Int64
     health::HEALTH
     swap::HEALTH   
@@ -38,13 +39,20 @@ end
     delay_distribution::Distribution = Gamma(1.7, 14)
 end
 
+function mytestfunc(x) 
+    println("running on $(gethostname()) id: $(myid())")
+    println("revise modification")
+    return x * 5
+end
+export mytestfunc
+
 # global system settings 
 # US age distribution for 2018. Downloaded from https://www.census.gov/data/tables/time-series/demo/popest/2010s-national-detail.html 
 # the file is on the cluster in /data/datasets/
 const agedist =  Categorical(@SVector [0.04826002, 0.061624508, 0.063477388, 0.06418943, 0.066031645, 0.071781172, 0.068554794, 0.066528651, 0.061066338, 0.062600017, 0.06295431, 0.06740441, 0.063575735, 0.054156946, 0.117794637])
 const agebraks = @SVector [0:199, 200:449, 450:699, 700:949, 950:1199, 1200:1449, 1450:1699, 1700:1949, 1950:2199, 2200:2449, 2450:2699, 2700:2949, 2950:3199, 3200:3449, 3450:5000]
 const humans = Array{Human}(undef, 1000)
-const fixed_distribution = Gamma(1.7, 1.25)
+const fixed_distribution = Gamma(1.7, 1.25)  # the distribution for "fixed" i.e. ontime vaccination. 
 const P = ModelParameters()
 ## code for age bracket generate @SVector [(i):(i+250-1) for i = 200:250:4950]
 
@@ -52,9 +60,11 @@ export HEALTH, humans, agedist, agebraks, P
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
-function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 29.4, vt=1, b0=0.016, b1=0.9, obsize=1, obtime=[1], hicov=0.0, mtime=2500)  # P is model parameters
+function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 29.4, vt=1, b0=0.016, b1=0.9, obsize=1, obtime=[1], hicov=0.0, mtime=2500)
     # main entry point of the simulation
     Random.seed!(simnumber)
+
+    !in("delay",("delay", "fixed")) && error("Vaccine scenarion $vs is not valid. Possible vaccine scenarios are: fixed, delay.")
 
     # set the global parameters of the model
     P.vaccination_scenario = vs  #shape,scale parameters are not used if scenario == fixed
@@ -97,6 +107,8 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 
     
     agm = Vector{Vector{Int64}}(undef, 15) # array of array, holds stratified population
 
+    gridsize = length(humans) 
+
     ## start main time loop    
     for t = 1:P.sim_time         
         ## update agm at every time step
@@ -124,7 +136,6 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 
         proc_ctr[t] = proc_ctr_update()
         avg6_ctr[t] = avg_age_infection()
 
-        gridsize = length(humans) 
         ## loop for contact tranmission dynamics
         for j in 1:gridsize            
             x = humans[j]
@@ -152,9 +163,8 @@ end
 export main
 
 function proc_ctr_update()
-    # this function calculates the total "amount of protection" 
-    # in the population at any given time.
-    # used in the main function as a data collection tool 
+    # this function calculates the total "amount of protection" in the population at any given time.
+    # used to collect data about the simulation 
     protected_humans = findall(x -> x.health == SUSC && x.protection > 0, humans)
     totalprotection = 0.0
     for i in protected_humans
@@ -165,12 +175,14 @@ end
 export proc_ctr_update
 
 function avg_age_infection()
+    # takes all infected individuals and calculates the average age of infection 
+    # used to collect data about the simulation 
     inf_humans = findall(x -> x.health == INF, humans)
     ages = [humans[i].age for i in inf_humans]
     if length(ages) > 0 
         return mean(ages)
     else 
-        return 0 
+        return 0.0 
     end
 end
 export avg_age_infection
@@ -309,6 +321,7 @@ function calc_ageofdeath(age)
     end
     return rt*50    
 end
+export calc_ageofdeath
 
 function get_group(age)
     # input age: in weeks, output group from 1:15 
