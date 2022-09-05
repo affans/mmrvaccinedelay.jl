@@ -37,11 +37,12 @@ end
     beta1 = 0.9    ## used for the seasonality amplitude. 
     initial_infected::Int64 = 20
     delay_distribution::Distribution = Gamma(1.7, 14)
+    inftime_prob::Float64 = 0.5 # probability of infectiousness in week 1 or week 2 (0.0 = week 1, 1.0 = week 2)
 end
 
 function mytestfunc(x) 
     println("running on $(gethostname()) id: $(myid())")
-    println("revise modification")
+    println("revise modification, with includet")
     return x * 5
 end
 export mytestfunc
@@ -60,7 +61,7 @@ export HEALTH, humans, agedist, agebraks, P
 
 Base.show(io::IO, ::MIME"text/plain", z::Human) = dump(z)
 
-function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 29.4, vt=1, b0=0.016, b1=0.9, obsize=1, obtime=[1], hicov=0.0, mtime=2500)
+function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 29.4, vt=1, b0=0.016, b1=0.9, obsize=1, obtime=[1], hicov=0.0, inftime_prob=0.5, mtime=2500)
     # main entry point of the simulation
     Random.seed!(simnumber)
 
@@ -75,6 +76,7 @@ function main(simnumber=1, hsize=1000, vc=0.8, vs="fixed", shape = 1.7, scale = 
     P.sim_time = mtime   
     P.herdimmunity_coverage = hicov
     P.delay_distribution = Gamma(shape, scale)  
+    P.inftime_prob = inftime_prob
     # shape 1.7
     # scale=14,  avg delay: 6 months
     # scale=29.4 avg delay: 1 year
@@ -309,7 +311,7 @@ function calc_ageofdeath(age)
     ## or any of the following years. 
     ## based on USA life tables
     rt = 100 # default age of death
-    ageinyears = Int(floor(age/50))    
+    ageinyears = Int(floor(age/50)) # convert their current age in weeks to years.    
     for age = ageinyears:100  ## 100% fatal at age 100
         getprobdeath = death_dist[age + 1]  ## since arrays are 1 based
         #println("prob: $getprobdeath")
@@ -319,7 +321,7 @@ function calc_ageofdeath(age)
             break
         end
     end
-    return rt*50    
+    return min(5000, rt*50 + rand(1:50)) # to add stochastcity to the time of death (i.e. some particulr week in that year of death)  
 end
 export calc_ageofdeath
 
@@ -327,7 +329,7 @@ function get_group(age)
     # input age: in weeks, output group from 1:15 
     r = findfirst(brak -> age in brak, agebraks) 
     if r === nothing # this should never happen
-        error("get_group threw an error")
+        error("get_group threw an error updated, the age is $age")
     end
     return r 
 end
@@ -447,7 +449,7 @@ function contact_dynamic2(x, beta, agm)
                     if y.health == SUSC 
                         if rand() < beta*(1 - y.protection)
                             y.swap = INF      # set the swap. 
-                            if rand() < 0.5  
+                            if rand() < P.inftime_prob
                                 y.infweek = 0 
                             else 
                                 y.infweek = 1

@@ -1,6 +1,6 @@
-## this file runs and processes the main simulations
-## it considers the fact that simulations are run parallel.
-## it is advised to run initcluster.jl first to setup parallel workers.
+## File is deprecated 
+## use scripts/run.jl to run simulations
+
 
 using Parameters
 using Dates
@@ -228,4 +228,23 @@ end
 #     d = Gamma(1.7, sc)
 #     m = round(mean(d);digits=2)
 #     println("delay of $i months (dist mean: $m in weeks, $(round((m/4);digits=2)) in months), parameters: $(params(d))")
+# end
+
+# function calibrate() 
+#     rvals = 5:30 # R values of 5 to 30 
+#     beta = beta_regression(rvals)  ## get the exact beta's from regression analysis
+#     br = Dict(ros .=> beta)      ## make a dictionary out of it. 
+# end
+
+# function beta_regression(ros)
+#     ## ros = an array of R0s... this function will calculate and return the corresponding beta value.
+#     ## however, when running the simulations, the used beta value may not return the same R0 because of stochastcity
+#     ## use the following beta values to regress. 
+#     beta = collect(0.1:0.01:0.35)  # beta values
+#     rs = calculate_reprodnums(beta)
+#     ols = lm(@formula(ro ~ b), rs)
+#     c = coef(ols)
+
+#     cbs = (ros .- c[1])/c[2]  ## these are the calculated betas
+#     return cbs 
 # end
